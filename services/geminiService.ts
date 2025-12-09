@@ -1,15 +1,22 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Initialize directly with process.env.API_KEY per guidelines.
-// "The API key must be obtained exclusively from the environment variable process.env.API_KEY"
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+// 1. Remove the top-level initialization that causes the crash
+// const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string }); <-- BAD
+
+// Helper to get the AI instance safely
+const getAI = () => {
+  const key = process.env.API_KEY;
+  if (!key) {
+    console.warn("Gemini API Key is missing");
+    return null;
+  }
+  return new GoogleGenAI({ apiKey: key });
+};
 
 export const breakDownTask = async (taskText: string): Promise<string[]> => {
-  if (!process.env.API_KEY) {
-    console.warn("No API Key found");
-    return [];
-  }
+  // 2. Initialize inside the function instead
+  const ai = getAI();
+  if (!ai) return [];
 
   try {
     const response = await ai.models.generateContent({
@@ -32,8 +39,6 @@ export const breakDownTask = async (taskText: string): Promise<string[]> => {
     const text = response.text;
     if (!text) return [];
     
-    // Parse JSON and extract strings. Expecting array of objects or strings depending on model behavior,
-    // but we requested schema. Let's handle generic array output safely.
     let parsed: any;
     try {
         parsed = JSON.parse(text);
@@ -56,12 +61,10 @@ export const breakDownTask = async (taskText: string): Promise<string[]> => {
 };
 
 export const generateTasksFromNote = async (noteContent: string): Promise<string[]> => {
-    if (!process.env.API_KEY) {
-        console.warn("No API Key found");
-        return [];
-    }
+    // 3. Initialize inside the function here too
+    const ai = getAI();
+    if (!ai) return [];
 
-    // Strip HTML tags for cleaner processing
     const cleanText = noteContent.replace(/<[^>]*>?/gm, '');
 
     try {
