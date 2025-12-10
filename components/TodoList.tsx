@@ -15,7 +15,7 @@ type GoalTier = 'gold' | 'silver' | 'bronze';
 // Threshold for auto-archiving (30 days in ms)
 const ARCHIVE_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000;
 
-// Helper to generate IDs
+// Helper to generate ID
 const generateId = () => {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
         return crypto.randomUUID();
@@ -1065,7 +1065,12 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `north-star-backup-${new Date().toISOString().slice(0,10)}.json`;
+      
+      const now = new Date();
+      // Format: YYYY-MM-DD_HH-mm-ss
+      const timestamp = now.toISOString().replace('T', '_').replace(/:/g, '-').slice(0, 19);
+      a.download = `north-star-backup-${timestamp}.json`;
+      
       a.click();
   }, [notes]);
   
