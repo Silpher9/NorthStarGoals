@@ -52,12 +52,15 @@ const StatsView: React.FC<StatsViewProps> = ({ todos }) => {
       // 2. Convert to Quarter Hours (Base Points)
       const qh = Math.ceil(mins / 15);
       
-      // 3. Get Multiplier
+      // 3. Get Tier Multiplier
       const tier = getTier(t, allTodos);
-      const mult = MULTIPLIERS[tier];
+      const tierMult = MULTIPLIERS[tier];
+      
+      // 4. Get Velocity Multiplier (from Routine Streak)
+      const velocityMult = t.multiplier || 1.0;
 
-      // 4. Calculate
-      return qh * mult;
+      // 5. Calculate
+      return qh * tierMult * velocityMult;
   };
 
   // 1. Calculate General Stats

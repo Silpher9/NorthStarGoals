@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Todo } from '../types';
-import { Trash2, Check, Clock, Trophy, FolderOpen, ChevronRight, ChevronDown, Plus, CornerDownRight, AlignLeft, Layers, Zap, Tag, Lock, Timer, RefreshCcw, Play, Pause, Archive, RotateCcw, X as XIcon, Edit3, Rocket, Eye, EyeOff } from 'lucide-react';
+import { Trash2, Check, Clock, Trophy, FolderOpen, ChevronRight, ChevronDown, Plus, CornerDownRight, AlignLeft, Layers, Zap, Tag, Lock, Timer, RefreshCcw, Play, Pause, Archive, RotateCcw, X as XIcon, Edit3, Rocket, Eye, EyeOff, Flame } from 'lucide-react';
 import RichTextEditor from './RichTextEditor';
 
 interface TodoItemProps {
@@ -256,20 +256,22 @@ const TodoItem: React.FC<TodoItemProps> = ({
               const item = allTodos.find(i => i.id === pid);
               if (!item) return 0;
               const mins = item.durationMinutes || 15;
-              return Math.ceil(mins / 15);
+              const velocityMult = item.multiplier || 1.0;
+              return Math.ceil(mins / 15) * velocityMult; // Multiply base blocks by velocity
           }
       };
 
       const blocks = calcBlocks(todo.id);
-      return blocks * multiplier;
+      return Math.round(blocks * multiplier);
   }, [allTodos, todo.id, todo.durationMinutes, multiplier]);
   
   // Calculate potential earnings for this specific task
   const taskEarnedPoints = useMemo(() => {
       const mins = todo.durationMinutes || 15;
       const blocks = Math.ceil(mins / 15);
-      return blocks * multiplier;
-  }, [todo.durationMinutes, multiplier]);
+      const velocityMult = todo.multiplier || 1.0;
+      return Math.round(blocks * multiplier * velocityMult);
+  }, [todo.durationMinutes, multiplier, todo.multiplier]);
 
   // Dynamic Buyback Cost: 1.5x earnings
   const buybackCost = useMemo(() => {
@@ -282,8 +284,9 @@ const TodoItem: React.FC<TodoItemProps> = ({
       const m = parseInt(minutesInput || '0', 10);
       const totalMinutes = h * 60 + m;
       const qh = Math.ceil((totalMinutes || 15) / 15);
-      return qh * multiplier;
-  }, [hoursInput, minutesInput, multiplier]);
+      const velocityMult = todo.multiplier || 1.0;
+      return Math.round(qh * multiplier * velocityMult);
+  }, [hoursInput, minutesInput, multiplier, todo.multiplier]);
 
   const isContextParent = viewContext === 'today' && isBlocked;
   
@@ -469,6 +472,17 @@ const TodoItem: React.FC<TodoItemProps> = ({
                             </span>
                         )}
 
+                        {/* VELOCITY BONUS BADGE */}
+                        {!isArchived && !isGraveyard && todo.multiplier && todo.multiplier > 1.0 && (
+                            <span 
+                                className="text-[10px] uppercase font-black tracking-wider px-1.5 py-0.5 rounded border flex items-center gap-1 bg-cyan-900/30 border-cyan-400/50 text-cyan-400"
+                                title={`Velocity Bonus: ${todo.multiplier}x`}
+                            >
+                                <Flame size={8} className="fill-current" />
+                                +{Math.round((todo.multiplier - 1) * 100)}%
+                            </span>
+                        )}
+
                         {todo.customLabel && !isGraveyard && !isArchived && (
                             <span className="flex items-center gap-1 text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border border-indigo-500/30 bg-indigo-500/10 text-indigo-300">
                                 <Tag size={8} />
@@ -646,7 +660,7 @@ const TodoItem: React.FC<TodoItemProps> = ({
                             <div className="flex flex-col">
                                 <span className="text-sm font-bold text-yellow-500">{previewPoints} pts</span>
                                 <span className="text-[9px] text-slate-400 font-mono leading-none">
-                                    {Math.ceil((parseInt(hoursInput||'0')*60 + parseInt(minutesInput||'0'))/15)} blk x {multiplier}x
+                                    {Math.ceil((parseInt(hoursInput||'0')*60 + parseInt(minutesInput||'0'))/15)} blk x {multiplier}x {(todo.multiplier && todo.multiplier > 1) ? `(+${Math.round((todo.multiplier - 1)*100)}%)` : ''}
                                 </span>
                             </div>
                         </div>

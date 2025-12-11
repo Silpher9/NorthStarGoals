@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Plus, Calendar, Skull, Trophy, CheckCircle2, Target, X, ChevronLeft, ChevronRight, FolderOpen, StickyNote, Trash2, Tag, Layers, CornerDownRight, Pencil, BarChart3, Search, Filter, Square, CheckSquare, Clock, Settings, Upload, Download, AlertTriangle, List, Rocket, Globe, Archive, Sparkles, ArrowRight, Loader2 } from 'lucide-react';
 import TodoItem from './TodoItem';
-import { Todo, Note } from '../types';
+import RoutineManager from './RoutineManager';
+import { Todo, Note, Routine } from '../types';
 import { breakDownTask, generateTasksFromNote } from '../services/geminiService';
 
 // Lazy load heavy components
@@ -479,6 +480,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({
 
 interface GoalManagementViewProps {
     todos: Todo[];
+    routines: Routine[];
     onAddGoal: (text: string, tier: GoalTier) => void;
     onAddNormal: (text: string) => void;
     onDelete: (id: string) => void;
@@ -491,11 +493,15 @@ interface GoalManagementViewProps {
     onBuyback: (id: string, cost: number) => void;
     onBreakDown: (id: string) => Promise<void>;
     onAddSubTask: (parentId: string, text: string) => void;
+    // Routine Props
+    onAddRoutine: (routine: Omit<Routine, 'id' | 'createdAt' | 'lastGeneratedDate' | 'completedCycles' | 'streak'>) => void;
+    onDeleteRoutine: (id: string) => void;
     totalPlannedTime: number;
 }
 
 const GoalManagementView: React.FC<GoalManagementViewProps> = ({ 
     todos, 
+    routines,
     onAddGoal, 
     onAddNormal, 
     onDelete, 
@@ -507,6 +513,8 @@ const GoalManagementView: React.FC<GoalManagementViewProps> = ({
     onBuyback,
     onBreakDown,
     onAddSubTask,
+    onAddRoutine,
+    onDeleteRoutine,
     totalPlannedTime
 }) => {
     const goals = useMemo(() => todos.filter(t => t.label === 'goal' && t.status !== 'graveyard'), [todos]);
@@ -618,6 +626,13 @@ const GoalManagementView: React.FC<GoalManagementViewProps> = ({
                         <GoalSlot tier="bronze" index={bronzeGoals.length} onAdd={onAddGoal} onDelete={onDelete} />
                     </div>
                 </div>
+
+                {/* ROUTINES / FLIGHT PATTERNS (MOVED HERE) */}
+                <RoutineManager 
+                    routines={routines}
+                    onAdd={onAddRoutine}
+                    onDelete={onDeleteRoutine}
+                />
                 
                 {/* Normal Tasks (Standard Orbit) */}
                 <div className="pt-8 border-t border-slate-800">
@@ -667,6 +682,15 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
     }
   });
 
+  const [routines, setRoutines] = useState<Routine[]>(() => {
+    try {
+        const saved = localStorage.getItem('routines');
+        return saved ? JSON.parse(saved) : [];
+    } catch {
+        return [];
+    }
+  });
+
   const [notes, setNotes] = useState<Note[]>(() => {
     try {
       const saved = localStorage.getItem('notes');
@@ -700,6 +724,10 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
   }, [todos, onGoalsChange]);
 
   useEffect(() => {
+    localStorage.setItem('routines', JSON.stringify(routines));
+  }, [routines]);
+
+  useEffect(() => {
     localStorage.setItem('notes', JSON.stringify(notes));
   }, [notes]);
 
@@ -709,6 +737,100 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
   const todosRef = useRef(todos);
   useEffect(() => { todosRef.current = todos; }, [todos]);
 
+  // --- ROUTINE GENERATOR LOGIC ---
+  useEffect(() => {
+     // Run check on mount and whenever routines config changes
+     const now = new Date();
+     
+     // CRITICAL FIX: Use Local Time, not UTC for todayStr to match getDay() logic.
+     // toISOString() uses UTC. We need YYYY-MM-DD in local time.
+     const offset = now.getTimezoneOffset();
+     const localDate = new Date(now.getTime() - (offset*60*1000));
+     const todayStr = localDate.toISOString().split('T')[0]; // YYYY-MM-DD
+     
+     const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon...
+     const dayOfMonth = now.getDate(); // 1-31
+
+     // Helper for Bi-Weekly parity (ISO Week number based)
+     const getWeekNumber = (d: Date) => {
+        d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+        d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+        var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+        var weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+        return weekNo;
+     };
+     const currentWeek = getWeekNumber(now);
+
+     setRoutines(prev => {
+        let hasUpdates = false;
+        const newTasks: Todo[] = [];
+        
+        // Use map to create new array instead of modifying prev directly (Strict Mode safety)
+        const newRoutines = prev.map(routine => {
+            // 1. Skip if already generated today
+            if (routine.lastGeneratedDate === todayStr) return routine;
+
+            // 2. Check Triggers
+            let shouldRun = false;
+
+            if (routine.frequency === 'weekly') {
+                if (routine.daysOfWeek.includes(dayOfWeek)) shouldRun = true;
+            } else if (routine.frequency === 'biweekly') {
+                // Determine start week parity based on creation
+                const startWeek = getWeekNumber(new Date(routine.createdAt));
+                // Run if current week parity matches start week parity AND day matches
+                if ((currentWeek % 2 === startWeek % 2) && routine.daysOfWeek.includes(dayOfWeek)) {
+                    shouldRun = true;
+                }
+            } else if (routine.frequency === 'monthly') {
+                if (dayOfMonth === routine.dayOfMonth) shouldRun = true;
+            }
+
+            // 3. Spawn Task
+            if (shouldRun) {
+                hasUpdates = true;
+                
+                // CALCULATE MULTIPLIER BASED ON STREAK
+                // Streak = number of tasks completed.
+                // Every 4 tasks (approx 1 week of consistent work), add 0.1x. Cap at 1.5x.
+                const currentStreak = routine.streak || 0;
+                let multiplier = 1 + (Math.floor(currentStreak / 4) * 0.1);
+                if (multiplier > 1.5) multiplier = 1.5;
+
+                // Create Task
+                const newTask: Todo = {
+                    id: generateId(),
+                    text: routine.title,
+                    completed: false,
+                    createdAt: Date.now(),
+                    status: 'active',
+                    label: 'normal',
+                    customLabel: routine.label || 'Routine',
+                    routineId: routine.id,
+                    isActivated: true, // Auto-activate into Today view
+                    activationDeadline: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).getTime(), // End of Today
+                    multiplier: multiplier // Attach velocity multiplier
+                };
+                newTasks.push(newTask);
+                
+                // Return updated routine object
+                return { ...routine, lastGeneratedDate: todayStr };
+            }
+            
+            return routine;
+        });
+
+        if (hasUpdates) {
+            // Queue state update for Todos if tasks generated
+            if (newTasks.length > 0) {
+                setTodos(currentTodos => [...newTasks, ...currentTodos]);
+            }
+            return newRoutines;
+        }
+        return prev;
+     });
+  }, [routines]); // Use routines object as dependency to ensure updates catch fresh state
+  
   // Daily Deadline Check - Only check for expiration, do NOT decrement timer here
   useEffect(() => {
     const interval = setInterval(() => {
@@ -798,6 +920,24 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
       });
   }, []);
 
+  // Routine Handlers
+  const handleAddRoutine = useCallback((routineData: Omit<Routine, 'id' | 'createdAt' | 'lastGeneratedDate' | 'completedCycles' | 'streak'>) => {
+      const newRoutine: Routine = {
+          ...routineData,
+          id: generateId(),
+          createdAt: Date.now(),
+          completedCycles: 0,
+          streak: 0
+      };
+      setRoutines(prev => [...prev, newRoutine]);
+  }, []);
+
+  const handleDeleteRoutine = useCallback((id: string) => {
+      if(confirm("Delete this routine? It will stop generating tasks.")) {
+        setRoutines(prev => prev.filter(r => r.id !== id));
+      }
+  }, []);
+
   const handleAddGoal = useCallback((text: string, tier: GoalTier) => {
       addTodo(text, 'goal', undefined, tier);
   }, [addTodo]);
@@ -811,35 +951,12 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
   }, [addTodo]);
   
   const handleAddProjectTask = useCallback((text: string, customLabel?: string) => {
-      // Need to access viewingGoalId here. Since it's state, it might change.
-      // But this callback is passed to ProjectView where viewingGoalId is fixed for that view's lifecycle?
-      // Actually we need to capture the current goal ID.
-      // ProjectView passes `onAddTask={handleAddProjectTask}`.
-      // Let's modify handleAddProjectTask to check the active goal.
-      // Or better, let ProjectView handle the ID logic locally by calling a generic add.
-      // But ProjectView calls `onAddTask` with just text and label.
-      // We need `viewingGoalId` ref or dependency.
-      // This is tricky for pure memoization if viewingGoalId changes.
-      // But viewingGoalId only changes when switching views, so re-creating callback then is cheap.
       setViewingGoalId(currentId => {
           if (currentId) {
-             // We can't call addTodo here because we are in state setter.
-             // We need to use the ref or state directly.
-             // Better: don't use this callback, pass a specialized closure or ID to ProjectView?
-             // Actually, simply depending on viewingGoalId is fine.
              return currentId;
           }
           return null;
       });
-  }, []); // Placeholder, see logic inside ProjectView render
-
-  // Wrapper for Add Project Task that has access to ID
-  const addProjectTaskWrapper = useCallback((text: string, customLabel?: string) => {
-       // We can read viewingGoalId from state directly if we include it in deps, 
-       // but we want stable callback.
-       // Actually ProjectView is re-rendered when viewingGoalId changes (different goal).
-       // So we can just use a callback that depends on viewingGoalId.
-       // OR we pass the ID to the add function.
   }, []);
 
   // Optimized delete
@@ -861,6 +978,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
   }, []);
 
   const toggleTodo = useCallback((id: string) => {
+    // 1. Update Todo Status
     setTodos(prev => prev.map(t => {
       if (t.id === id) {
         // If it's in archive, restore to active
@@ -879,6 +997,38 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
       }
       return t;
     }));
+    
+    // 2. Update Routine Stats if linked
+    // Accessing `todosRef.current` is safe here.
+    const task = todosRef.current.find(t => t.id === id);
+    if (task && task.routineId) {
+        // If we are marking as COMPLETE (was false)
+        if (!task.completed) {
+            setRoutines(prev => prev.map(r => {
+                if (r.id === task.routineId) {
+                    return {
+                        ...r,
+                        completedCycles: r.completedCycles + 1,
+                        streak: (r.streak || 0) + 1
+                    };
+                }
+                return r;
+            }));
+        } else {
+            // If marking as incomplete, decrement?
+            // For simplicity and user forgiveness, let's decrement.
+            setRoutines(prev => prev.map(r => {
+                 if (r.id === task.routineId) {
+                    return {
+                        ...r,
+                        completedCycles: Math.max(0, r.completedCycles - 1),
+                        streak: Math.max(0, (r.streak || 0) - 1)
+                    };
+                }
+                return r;
+            }));
+        }
+    }
   }, []);
 
   const updateDescription = useCallback((id: string, description: string) => {
@@ -1060,7 +1210,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
   // Settings Handlers
   const handleExport = useCallback(() => {
       // Use ref for export to avoid stale state in callback if not updating
-      const data = { todos: todosRef.current, notes, version: 1, exportedAt: Date.now() };
+      const data = { todos: todosRef.current, routines, notes, version: 1, exportedAt: Date.now() };
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -1072,7 +1222,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
       a.download = `north-star-backup-${timestamp}.json`;
       
       a.click();
-  }, [notes]);
+  }, [notes, routines]);
   
   const handleImport = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -1085,6 +1235,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
               if (typeof result === 'string') {
                 const data = JSON.parse(result);
                 if (data.todos) setTodos(data.todos);
+                if (data.routines) setRoutines(data.routines);
                 if (data.notes) setNotes(data.notes);
                 alert("Data restored successfully.");
               }
@@ -1098,8 +1249,10 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
   
   const clearAll = useCallback(() => {
       setTodos([]);
+      setRoutines([]);
       setNotes([]);
       localStorage.removeItem('todos');
+      localStorage.removeItem('routines');
       localStorage.removeItem('notes');
   }, []);
 
@@ -1228,6 +1381,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
         {activeTab === 'goals' && (
             <GoalManagementView 
                 todos={todos} 
+                routines={routines}
                 onAddGoal={handleAddGoal} 
                 onAddNormal={handleAddNormal}
                 onDelete={deleteTodo} 
@@ -1239,6 +1393,8 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
                 onBuyback={buybackTask}
                 onBreakDown={handleBreakDown}
                 onAddSubTask={handleAddSubTask}
+                onAddRoutine={handleAddRoutine}
+                onDeleteRoutine={handleDeleteRoutine}
                 totalPlannedTime={totalPlannedMinutes}
             />
         )}
