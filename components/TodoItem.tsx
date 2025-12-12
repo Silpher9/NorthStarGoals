@@ -2,6 +2,13 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { Todo } from '../types';
 import { Trash2, Check, Clock, Trophy, FolderOpen, ChevronRight, ChevronDown, Plus, CornerDownRight, AlignLeft, Layers, Zap, Tag, Lock, Timer, RefreshCcw, Play, Pause, Archive, RotateCcw, X as XIcon, Edit3, Rocket, Eye, EyeOff, Flame } from 'lucide-react';
 import RichTextEditor from './RichTextEditor';
+import { 
+  TIER_MULTIPLIERS, 
+  getTierFromTodo, 
+  calculateTaskPoints, 
+  calculateTreePoints,
+  type Tier 
+} from '../utils/pointCalculations';
 
 interface TodoItemProps {
   todo: Todo;
@@ -188,28 +195,19 @@ const TodoItem: React.FC<TodoItemProps> = ({
   
   // Robust Tier Inheritance
   // Even if parentTier prop isn't passed (e.g. in Today view), we climb the tree to find the category.
-  const effectiveTier = useMemo(() => {
-      if (tier) return tier; // If I am a goal/category
-      if (parentTier) return parentTier; // If passed from parent render
+  const effectiveTier = useMemo((): Tier => {
+      if (tier) return tier as Tier; // If I am a goal/category
+      if (parentTier) return parentTier as Tier; // If passed from parent render
 
-      // Try to find from allTodos
-      if (allTodos && todo.parentId) {
-          let current = allTodos.find(t => t.id === todo.parentId);
-          while (current) {
-              if (current.goalCategory) return current.goalCategory;
-              current = allTodos.find(t => t.id === current?.parentId);
-          }
+      // Use shared utility to find tier from parent chain
+      if (allTodos) {
+          return getTierFromTodo(todo, allTodos);
       }
       return 'normal';
-  }, [tier, parentTier, allTodos, todo.parentId]);
+  }, [tier, parentTier, allTodos, todo]);
 
-  const multiplier = useMemo(() => {
-    switch(effectiveTier) {
-        case 'gold': return 4;
-        case 'silver': return 3;
-        case 'bronze': return 2;
-        default: return 1;
-    }
+  const tierMultiplier = useMemo(() => {
+    return TIER_MULTIPLIERS[effectiveTier];
   }, [effectiveTier]);
 
   const containerClasses = useMemo(() => {
@@ -260,35 +258,16 @@ const TodoItem: React.FC<TodoItemProps> = ({
       return `${m}m`;
   }, [todo.durationMinutes]);
 
-  // Aggregated Points Calculation (for Children)
+  // Aggregated Points Calculation (for Children) - uses shared utility
   const totalPoints = useMemo(() => {
       if (!allTodos) return 0;
-
-      // Recursive Calc of Base Blocks
-      const calcBlocks = (pid: string): number => {
-          const children = allTodos.filter(t => t.parentId === pid && t.status !== 'graveyard');
-          if (children.length > 0) {
-              return children.reduce((sum, c) => sum + calcBlocks(c.id), 0);
-          } else {
-              const item = allTodos.find(i => i.id === pid);
-              if (!item) return 0;
-              const mins = item.durationMinutes || 15;
-              const velocityMult = item.multiplier || 1.0;
-              return Math.ceil(mins / 15) * velocityMult; // Multiply base blocks by velocity
-          }
-      };
-
-      const blocks = calcBlocks(todo.id);
-      return Math.round(blocks * multiplier);
-  }, [allTodos, todo.id, todo.durationMinutes, multiplier]);
+      return calculateTreePoints(todo.id, tierMultiplier, allTodos);
+  }, [allTodos, todo.id, tierMultiplier]);
   
-  // Calculate potential earnings for this specific task
+  // Calculate potential earnings for this specific task - uses shared utility
   const taskEarnedPoints = useMemo(() => {
-      const mins = todo.durationMinutes || 15;
-      const blocks = Math.ceil(mins / 15);
-      const velocityMult = todo.multiplier || 1.0;
-      return Math.round(blocks * multiplier * velocityMult);
-  }, [todo.durationMinutes, multiplier, todo.multiplier]);
+      return calculateTaskPoints(todo.durationMinutes, tierMultiplier, todo.multiplier);
+  }, [todo.durationMinutes, tierMultiplier, todo.multiplier]);
 
   // Dynamic Buyback Cost: 1.5x earnings
   const buybackCost = useMemo(() => {
@@ -300,10 +279,8 @@ const TodoItem: React.FC<TodoItemProps> = ({
       const h = parseInt(hoursInput || '0', 10);
       const m = parseInt(minutesInput || '0', 10);
       const totalMinutes = h * 60 + m;
-      const qh = Math.ceil((totalMinutes || 15) / 15);
-      const velocityMult = todo.multiplier || 1.0;
-      return Math.round(qh * multiplier * velocityMult);
-  }, [hoursInput, minutesInput, multiplier, todo.multiplier]);
+      return calculateTaskPoints(totalMinutes || 15, tierMultiplier, todo.multiplier);
+  }, [hoursInput, minutesInput, tierMultiplier, todo.multiplier]);
 
   const isContextParent = viewContext === 'today' && isBlocked;
   
@@ -516,10 +493,10 @@ const TodoItem: React.FC<TodoItemProps> = ({
                                     effectiveTier === 'bronze' ? 'bg-orange-900/30 border-orange-500/50 text-orange-500' :
                                     'bg-purple-900/30 border-purple-500/50 text-purple-400'}
                                 `}
-                                title={`Multiplier: ${multiplier}x Points`}
+                                title={`Multiplier: ${tierMultiplier}x Points`}
                             >
                                 <Zap size={8} className="fill-current" />
-                                {multiplier}x
+                                {tierMultiplier}x
                             </span>
                         )}
 
@@ -770,7 +747,7 @@ const TodoItem: React.FC<TodoItemProps> = ({
                             <div className="flex flex-col">
                                 <span className="text-sm font-bold text-yellow-500">{previewPoints} pts</span>
                                 <span className="text-[9px] text-slate-400 font-mono leading-none">
-                                    {Math.ceil((parseInt(hoursInput||'0')*60 + parseInt(minutesInput||'0'))/15)} blk x {multiplier}x {(todo.multiplier && todo.multiplier > 1) ? `(+${Math.round((todo.multiplier - 1)*100)}%)` : ''}
+                                    {Math.ceil((parseInt(hoursInput||'0')*60 + parseInt(minutesInput||'0'))/15)} blk x {tierMultiplier}x {(todo.multiplier && todo.multiplier > 1) ? `(+${Math.round((todo.multiplier - 1)*100)}%)` : ''}
                                 </span>
                             </div>
                         </div>

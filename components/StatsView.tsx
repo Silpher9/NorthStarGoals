@@ -1,67 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { Todo } from '../types';
 import { Activity, Calendar, Award, BarChart3 } from 'lucide-react';
-
-interface StatsViewProps {
-  todos: Todo[];
-}
-
-type Period = 'week' | 'month' | 'year';
-
-// Multipliers Configuration
-const MULTIPLIERS = {
-  gold: 4,
-  silver: 3,
-  bronze: 2,
-  normal: 1
-};
-
-const COLORS = {
-  gold: '#eab308',
-  silver: '#cbd5e1',
-  bronze: '#f97316',
-  normal: '#a855f7'
-};
+import { 
+  TIER_MULTIPLIERS, 
+  TIER_COLORS, 
+  getTierFromTodo, 
+  calculateTodoPoints,
+  type Tier 
+} from '../utils/pointCalculations';
 
 const StatsView: React.FC<StatsViewProps> = ({ todos }) => {
   const [period, setPeriod] = useState<Period>('week');
-
-  // Helper: Determine Tier with Inheritance (Recursive)
-  const getTier = (t: Todo, allTodos: Todo[]): 'gold' | 'silver' | 'bronze' | 'normal' => {
-      let current: Todo | undefined = t;
-      
-      while (current) {
-          if (current.label === 'goal' && current.goalCategory) {
-              return current.goalCategory as 'gold' | 'silver' | 'bronze';
-          }
-          if (current.parentId) {
-              current = allTodos.find(p => p.id === current!.parentId);
-          } else {
-              break;
-          }
-      }
-      return 'normal';
-  };
-
-  const calculatePoints = (t: Todo, allTodos: Todo[]): number => {
-      // 1. Get Duration in Minutes (stored on task)
-      // For leaf tasks, this is user set. For parents, it's aggregated by the TodoList logic.
-      // DEFAULT TO 15 MINUTES (1 Quarter Hour) if not set, ensuring every task has value.
-      const mins = t.durationMinutes || 15;
-
-      // 2. Convert to Quarter Hours (Base Points)
-      const qh = Math.ceil(mins / 15);
-      
-      // 3. Get Tier Multiplier
-      const tier = getTier(t, allTodos);
-      const tierMult = MULTIPLIERS[tier];
-      
-      // 4. Get Velocity Multiplier (from Routine Streak)
-      const velocityMult = t.multiplier || 1.0;
-
-      // 5. Calculate
-      return qh * tierMult * velocityMult;
-  };
 
   // 1. Calculate General Stats
   const stats = useMemo(() => {
@@ -79,7 +28,7 @@ const StatsView: React.FC<StatsViewProps> = ({ todos }) => {
 
       if (!t.completed && t.status !== 'graveyard') return;
 
-      const points = calculatePoints(t, todos);
+      const points = calculateTodoPoints(t, todos);
 
       if (t.completed) {
         totalScore += points;
@@ -151,7 +100,7 @@ const StatsView: React.FC<StatsViewProps> = ({ todos }) => {
     };
 
     todos.forEach(t => {
-      const tier = getTier(t, todos);
+      const tier = getTierFromTodo(t, todos);
       
       // Handle Buyback Events (Negative points at timestamp)
       if (t.buybackHistory) {
@@ -170,7 +119,7 @@ const StatsView: React.FC<StatsViewProps> = ({ todos }) => {
       const idx = getBucketIndex(rDate);
       if (idx === -1) return;
 
-      const points = calculatePoints(t, todos);
+      const points = calculateTodoPoints(t, todos);
 
       // Failed Penalty 3x
       const val = t.completed ? points : (t.status === 'graveyard' ? -(points * 3) : 0);
@@ -282,7 +231,7 @@ const StatsView: React.FC<StatsViewProps> = ({ todos }) => {
             });
         }
         
-        const tier = getTier(t, todos);
+        const tier = getTierFromTodo(t, todos);
         
         // Subtract buybacks first
         if (buybackDeductionMonth > 0) {
@@ -301,7 +250,7 @@ const StatsView: React.FC<StatsViewProps> = ({ todos }) => {
 
         if (!isYear) return;
 
-        const points = calculatePoints(t, todos);
+        const points = calculateTodoPoints(t, todos);
         
         // Failed Penalty 3x
         const val = t.completed ? points : (t.status === 'graveyard' ? -(points * 3) : 0);
@@ -398,18 +347,18 @@ const StatsView: React.FC<StatsViewProps> = ({ todos }) => {
                      </g>
 
                      <g className="drop-shadow-md">
-                        <polyline points={getPointsString(graphData.dataPoints.gold)} fill="none" stroke={COLORS.gold} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" className="opacity-90" />
-                        <polyline points={getPointsString(graphData.dataPoints.silver)} fill="none" stroke={COLORS.silver} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" className="opacity-90" />
-                        <polyline points={getPointsString(graphData.dataPoints.bronze)} fill="none" stroke={COLORS.bronze} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" className="opacity-90" />
-                        <polyline points={getPointsString(graphData.dataPoints.normal)} fill="none" stroke={COLORS.normal} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" className="opacity-90" />
+                        <polyline points={getPointsString(graphData.dataPoints.gold)} fill="none" stroke={TIER_COLORS.gold} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" className="opacity-90" />
+                        <polyline points={getPointsString(graphData.dataPoints.silver)} fill="none" stroke={TIER_COLORS.silver} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" className="opacity-90" />
+                        <polyline points={getPointsString(graphData.dataPoints.bronze)} fill="none" stroke={TIER_COLORS.bronze} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" className="opacity-90" />
+                        <polyline points={getPointsString(graphData.dataPoints.normal)} fill="none" stroke={TIER_COLORS.normal} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" className="opacity-90" />
                      </g>
                  </svg>
 
                  <div className="absolute inset-0 pointer-events-none z-20">
-                      <LabelOverlay val={Math.round(lastValues.gold)} yPerc={getYPerc(lastValues.gold)} color={COLORS.gold} />
-                      <LabelOverlay val={Math.round(lastValues.silver)} yPerc={getYPerc(lastValues.silver)} color={COLORS.silver} />
-                      <LabelOverlay val={Math.round(lastValues.bronze)} yPerc={getYPerc(lastValues.bronze)} color={COLORS.bronze} />
-                      <LabelOverlay val={Math.round(lastValues.normal)} yPerc={getYPerc(lastValues.normal)} color={COLORS.normal} />
+                      <LabelOverlay val={Math.round(lastValues.gold)} yPerc={getYPerc(lastValues.gold)} color={TIER_COLORS.gold} />
+                      <LabelOverlay val={Math.round(lastValues.silver)} yPerc={getYPerc(lastValues.silver)} color={TIER_COLORS.silver} />
+                      <LabelOverlay val={Math.round(lastValues.bronze)} yPerc={getYPerc(lastValues.bronze)} color={TIER_COLORS.bronze} />
+                      <LabelOverlay val={Math.round(lastValues.normal)} yPerc={getYPerc(lastValues.normal)} color={TIER_COLORS.normal} />
                       
                       {gridLines.hLines.map((g, i) => (
                            g.val !== 0 && (i % 2 === 0) && (
