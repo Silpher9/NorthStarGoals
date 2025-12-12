@@ -308,7 +308,7 @@ const GoalSlot: React.FC<GoalSlotProps> = React.memo(({ tier, index, existingGoa
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
-                            if (confirm(`Delete "${existingGoal.text}" and all its subtasks?`)) {
+                            if (window.confirm(`Delete "${existingGoal.text}" and all its subtasks?`)) {
                                 onDelete(existingGoal.id);
                             }
                         }}
@@ -401,7 +401,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({
     const s = styles[tier] || styles.normal;
 
     const handleDeleteProject = () => {
-        if (confirm("Are you sure you want to delete this task and all its subtasks?")) {
+        if (window.confirm("Are you sure you want to delete this task and all its subtasks?")) {
             onDelete(goal.id);
             onBack();
         }
@@ -961,7 +961,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
   }, []);
 
   const handleDeleteRoutine = useCallback((id: string) => {
-      if(confirm("Delete this routine? It will stop generating tasks.")) {
+      if(window.confirm("Delete this routine? It will stop generating tasks.")) {
         setRoutines(prev => prev.filter(r => r.id !== id));
       }
   }, []);
