@@ -505,6 +505,10 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
       galaxyMaterial.dispose();
       renderer.dispose();
       
+      // Dispose all sprite materials (per-sprite materials for independent opacity)
+      spriteMaterialsRef.current.forEach((mat) => mat.dispose());
+      spriteMaterialsRef.current.clear();
+      
       // Dispose cached textures (important for StrictMode re-mount)
       textureCacheRef.current.forEach((texture) => texture.dispose());
       textureCacheRef.current.clear();
