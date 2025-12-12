@@ -7,7 +7,6 @@ interface TodoItemProps {
   todo: Todo;
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
-  parentName?: string;
   parentTier?: string;
   allTodos?: Todo[];
   onAddSubTask?: (parentId: string, text: string) => void;
@@ -28,7 +27,6 @@ const TodoItem: React.FC<TodoItemProps> = ({
   todo, 
   onToggle, 
   onDelete, 
-  parentName,
   parentTier,
   allTodos,
   onAddSubTask,
