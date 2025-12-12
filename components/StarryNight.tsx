@@ -572,7 +572,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
             // USE CACHED TEXTURE
             const texture = getTexture(isRoot ? 'star' : 'planet', tier);
             // Create a NEW material instance so we can flicker opacity independently
-            const material = new THREE.SpriteMaterial({ 
+            const spriteMaterial = new THREE.SpriteMaterial({ 
                 map: texture, 
                 color: 0xffffff, 
                 transparent: true, 
@@ -580,11 +580,13 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
                 depthWrite: false,
                 fog: false
             });
+            // Track material for disposal
+            spriteMaterialsRef.current.set(goal.id, spriteMaterial);
 
             let sprite: THREE.Sprite;
             
             if (isRoot) {
-                sprite = new THREE.Sprite(material);
+                sprite = new THREE.Sprite(spriteMaterial);
                 sprite.userData = { 
                     id: goal.id, 
                     type: 'star',
@@ -594,7 +596,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
                     targetY: 0
                 };
             } else {
-                sprite = new THREE.Sprite(material);
+                sprite = new THREE.Sprite(spriteMaterial);
                 const pScale = 0.4; 
                 sprite.scale.set(pScale, pScale, 1);
                 
