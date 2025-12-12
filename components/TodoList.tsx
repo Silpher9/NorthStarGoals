@@ -296,16 +296,30 @@ const GoalSlot: React.FC<GoalSlotProps> = React.memo(({ tier, index, existingGoa
 
     if (existingGoal) {
         return (
-            <button 
-                onClick={() => onClick && onClick(existingGoal.id)}
+            <div 
                 className={`w-full relative group p-4 rounded-xl border ${c.border} ${c.bg} ${c.hover} flex items-center justify-between shadow-lg transition-transform hover:scale-[1.02] cursor-pointer text-left`}
+                onClick={() => onClick && onClick(existingGoal.id)}
             >
                 <div className="flex items-center gap-3">
                     {c.icon}
                     <span className={`font-bold uppercase tracking-wider text-sm ${c.text}`}>{existingGoal.text}</span>
                 </div>
-                <ChevronRight size={16} className={`opacity-0 group-hover:opacity-100 transition-opacity duration-300 ${c.text}`} />
-            </button>
+                <div className="flex items-center gap-1">
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`Delete "${existingGoal.text}" and all its subtasks?`)) {
+                                onDelete(existingGoal.id);
+                            }
+                        }}
+                        className="p-2 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-900/30 text-slate-500 hover:text-red-400 transition-all"
+                        title="Delete goal"
+                    >
+                        <Trash2 size={14} />
+                    </button>
+                    <ChevronRight size={16} className={`opacity-0 group-hover:opacity-100 transition-opacity duration-300 ${c.text}`} />
+                </div>
+            </div>
         );
     }
 
