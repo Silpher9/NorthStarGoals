@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
         react(),
         VitePWA({
           registerType: 'autoUpdate',
-          includeAssets: ['favicon.ico', 'icon.svg', 'apple-touch-icon.png'],
+          includeAssets: ['icon.svg'],
           manifest: {
             name: 'North Star Goals',
             short_name: 'NorthStar',
