@@ -964,15 +964,6 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
       addTodo(text, 'normal', parentId);
   }, [addTodo]);
   
-  const handleAddProjectTask = useCallback((text: string, customLabel?: string) => {
-      setViewingGoalId(currentId => {
-          if (currentId) {
-             return currentId;
-          }
-          return null;
-      });
-  }, []);
-
   // Optimized delete
   const deleteTodo = useCallback((id: string) => {
       setTodos(prev => {
