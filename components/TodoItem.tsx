@@ -551,15 +551,20 @@ const TodoItem: React.FC<TodoItemProps> = ({
                                         autoFocus
                                     />
                                 </div>
-                            ) : todo.customLabel ? (
+                            ) : todo.customLabel && onUpdateLabel ? (
                                 <button 
-                                    onClick={(e) => { e.stopPropagation(); onUpdateLabel && setIsEditingLabel(true); }}
+                                    onClick={(e) => { e.stopPropagation(); setIsEditingLabel(true); }}
                                     className="flex items-center gap-1 text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 transition-colors"
-                                    title={onUpdateLabel ? "Click to edit label" : undefined}
+                                    title="Click to edit label"
                                 >
                                     <Tag size={8} />
                                     {todo.customLabel}
                                 </button>
+                            ) : todo.customLabel ? (
+                                <span className="flex items-center gap-1 text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border border-indigo-500/30 bg-indigo-500/10 text-indigo-300">
+                                    <Tag size={8} />
+                                    {todo.customLabel}
+                                </span>
                             ) : onUpdateLabel && (
                                 <button 
                                     onClick={(e) => { e.stopPropagation(); setIsEditingLabel(true); }}
