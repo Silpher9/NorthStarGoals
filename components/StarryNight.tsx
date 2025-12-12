@@ -21,6 +21,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
 
   // Optimization Refs
   const textureCacheRef = useRef<Map<string, THREE.Texture>>(new Map());
+  const spriteMaterialsRef = useRef<Map<string, THREE.SpriteMaterial>>(new Map());
   const nodesRef = useRef<any[]>([]);
   const physicsFrameRef = useRef(0);
   
@@ -503,7 +504,12 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
       material.dispose();
       galaxyMaterial.dispose();
       renderer.dispose();
-      // Clear refs
+      
+      // Dispose cached textures (important for StrictMode re-mount)
+      textureCacheRef.current.forEach((texture) => texture.dispose());
+      textureCacheRef.current.clear();
+      
+      // Clear all refs for clean re-mount
       animationRef.current.starData = [];
       animationRef.current.geometry = null;
       animationRef.current.galaxySystem = null;
@@ -511,6 +517,9 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
       cameraRef.current = null;
       rendererRef.current = null;
       goalGroupRef.current = null;
+      nodesRef.current = [];
+      physicsFrameRef.current = 0;
+      labelElementsRef.current.clear();
     };
   }, []);
 
@@ -528,8 +537,9 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
         if (!newGoalIds.has(child.userData.id)) {
             goalGroupRef.current.remove(child);
             if (child instanceof THREE.Sprite) {
-                // Do not dispose material here as it's cached/shared
-                // child.material.dispose(); 
+                // Dispose the sprite's material (texture is cached separately)
+                child.material.dispose();
+                spriteMaterialsRef.current.delete(child.userData.id);
             }
         }
     }
