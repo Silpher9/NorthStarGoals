@@ -12,6 +12,8 @@ interface TodoItemProps {
   allTodos?: Todo[];
   onAddSubTask?: (parentId: string, text: string) => void;
   onUpdateDescription?: (id: string, description: string) => void;
+  onUpdateText?: (id: string, text: string) => void;
+  onUpdateLabel?: (id: string, label: string) => void;
   onActivate?: (id: string) => void;
   onSetDuration?: (id: string, durationMinutes: number) => void;
   onBuyback?: (id: string, cost: number) => void;
@@ -31,6 +33,8 @@ const TodoItem: React.FC<TodoItemProps> = ({
   allTodos,
   onAddSubTask,
   onUpdateDescription,
+  onUpdateText,
+  onUpdateLabel,
   onActivate,
   onSetDuration,
   onBuyback,
@@ -56,6 +60,12 @@ const TodoItem: React.FC<TodoItemProps> = ({
   // Confirmation Modal State
   const [showCompleteConfirmation, setShowCompleteConfirmation] = useState(false);
 
+  // Inline Editing State for Title and Label
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState(todo.text);
+  const [isEditingLabel, setIsEditingLabel] = useState(false);
+  const [editedLabel, setEditedLabel] = useState(todo.customLabel || '');
+
   // Local Timer State for visual countdown
   const [timeLeftString, setTimeLeftString] = useState<string | null>(null);
 
@@ -63,6 +73,15 @@ const TodoItem: React.FC<TodoItemProps> = ({
   useEffect(() => {
     setDescription(todo.description || '');
   }, [todo.description]);
+
+  // Sync title/label state if prop changes
+  useEffect(() => {
+    setEditedTitle(todo.text);
+  }, [todo.text]);
+
+  useEffect(() => {
+    setEditedLabel(todo.customLabel || '');
+  }, [todo.customLabel]);
 
   const isGraveyard = todo.status === 'graveyard';
   const isArchived = todo.status === 'archive';
@@ -328,6 +347,40 @@ const TodoItem: React.FC<TodoItemProps> = ({
       }
   };
 
+  const handleTitleSave = () => {
+      if (onUpdateText && editedTitle.trim() && editedTitle !== todo.text) {
+          onUpdateText(todo.id, editedTitle.trim());
+      }
+      setIsEditingTitle(false);
+  };
+
+  const handleTitleKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+          e.preventDefault();
+          handleTitleSave();
+      } else if (e.key === 'Escape') {
+          setEditedTitle(todo.text);
+          setIsEditingTitle(false);
+      }
+  };
+
+  const handleLabelSave = () => {
+      if (onUpdateLabel && editedLabel !== (todo.customLabel || '')) {
+          onUpdateLabel(todo.id, editedLabel.trim());
+      }
+      setIsEditingLabel(false);
+  };
+
+  const handleLabelKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+          e.preventDefault();
+          handleLabelSave();
+      } else if (e.key === 'Escape') {
+          setEditedLabel(todo.customLabel || '');
+          setIsEditingLabel(false);
+      }
+  };
+
   const handleSetTimerClick = () => {
       if (canActivate && canSetTimer) {
           // Pre-fill with existing if any
@@ -483,11 +536,40 @@ const TodoItem: React.FC<TodoItemProps> = ({
                             </span>
                         )}
 
-                        {todo.customLabel && !isGraveyard && !isArchived && (
-                            <span className="flex items-center gap-1 text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border border-indigo-500/30 bg-indigo-500/10 text-indigo-300">
-                                <Tag size={8} />
-                                {todo.customLabel}
-                            </span>
+                        {!isGraveyard && !isArchived && (
+                            isEditingLabel ? (
+                                <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                                    <Tag size={8} className="text-indigo-400" />
+                                    <input
+                                        type="text"
+                                        value={editedLabel}
+                                        onChange={(e) => setEditedLabel(e.target.value)}
+                                        onBlur={handleLabelSave}
+                                        onKeyDown={handleLabelKeyDown}
+                                        className="bg-slate-900 border border-indigo-500/50 rounded px-1.5 py-0.5 text-[9px] uppercase font-bold tracking-wider text-indigo-300 focus:outline-none focus:border-indigo-400 w-20"
+                                        placeholder="Label"
+                                        autoFocus
+                                    />
+                                </div>
+                            ) : todo.customLabel ? (
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); onUpdateLabel && setIsEditingLabel(true); }}
+                                    className="flex items-center gap-1 text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 transition-colors"
+                                    title={onUpdateLabel ? "Click to edit label" : undefined}
+                                >
+                                    <Tag size={8} />
+                                    {todo.customLabel}
+                                </button>
+                            ) : onUpdateLabel && (
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); setIsEditingLabel(true); }}
+                                    className="flex items-center gap-1 text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border border-dashed border-slate-600 bg-slate-800/30 text-slate-500 hover:border-indigo-500/50 hover:text-indigo-400 transition-colors"
+                                    title="Add label"
+                                >
+                                    <Tag size={8} />
+                                    <Plus size={8} />
+                                </button>
+                            )
                         )}
                         
                         {showTimerPill && (
@@ -510,19 +592,44 @@ const TodoItem: React.FC<TodoItemProps> = ({
                 
                 {/* REMOVED Individual Daily Deadline Countdown - Moved to Global Header */}
 
-                <span 
-                    className={`
-                        text-sm md:text-base break-words transition-all truncate
-                        ${isGraveyard ? 'text-red-300/60 line-through decoration-red-500/30' : 
-                          isArchived ? 'text-slate-500 italic' :
-                          todo.completed ? 'text-slate-500 line-through decoration-slate-600' : 
-                          isGoal ? 'text-slate-100 font-medium' : 
-                          isActivated ? 'text-slate-200' : 'text-slate-400 italic'}
-                        ${isContextParent ? 'text-slate-500 font-bold uppercase text-xs tracking-wider' : ''}
-                    `}
-                >
-                    {todo.text}
-                </span>
+                {isEditingTitle ? (
+                    <input
+                        type="text"
+                        value={editedTitle}
+                        onChange={(e) => setEditedTitle(e.target.value)}
+                        onBlur={handleTitleSave}
+                        onKeyDown={handleTitleKeyDown}
+                        onClick={(e) => e.stopPropagation()}
+                        className={`
+                            text-sm md:text-base bg-slate-900 border border-indigo-500/50 rounded px-2 py-1
+                            focus:outline-none focus:border-indigo-400 flex-grow min-w-[200px]
+                            ${isGoal ? 'text-slate-100 font-medium' : 'text-slate-200'}
+                        `}
+                        autoFocus
+                    />
+                ) : (
+                    <span 
+                        onClick={(e) => { 
+                            if (onUpdateText && !isGraveyard && !isArchived && !todo.completed) {
+                                e.stopPropagation(); 
+                                setIsEditingTitle(true); 
+                            }
+                        }}
+                        className={`
+                            text-sm md:text-base break-words transition-all truncate
+                            ${isGraveyard ? 'text-red-300/60 line-through decoration-red-500/30' : 
+                              isArchived ? 'text-slate-500 italic' :
+                              todo.completed ? 'text-slate-500 line-through decoration-slate-600' : 
+                              isGoal ? 'text-slate-100 font-medium' : 
+                              isActivated ? 'text-slate-200' : 'text-slate-400 italic'}
+                            ${isContextParent ? 'text-slate-500 font-bold uppercase text-xs tracking-wider' : ''}
+                            ${onUpdateText && !isGraveyard && !isArchived && !todo.completed ? 'cursor-text hover:bg-slate-800/50 rounded px-1 -mx-1' : ''}
+                        `}
+                        title={onUpdateText && !isGraveyard && !isArchived && !todo.completed ? "Click to edit title" : undefined}
+                    >
+                        {todo.text}
+                    </span>
+                )}
                 
                 {showDetails && isBlocked && !isContextParent && !todo.completed && !isArchived && (
                     <span title="Complete subtasks first" className="flex items-center">
@@ -865,6 +972,8 @@ const TodoItem: React.FC<TodoItemProps> = ({
                         allTodos={allTodos}
                         onAddSubTask={onAddSubTask}
                         onUpdateDescription={onUpdateDescription}
+                        onUpdateText={onUpdateText}
+                        onUpdateLabel={onUpdateLabel}
                         onActivate={onActivate}
                         onSetDuration={onSetDuration}
                         onBuyback={onBuyback}
@@ -908,6 +1017,8 @@ const TodoItem: React.FC<TodoItemProps> = ({
                                 allTodos={allTodos}
                                 onAddSubTask={onAddSubTask}
                                 onUpdateDescription={onUpdateDescription}
+                                onUpdateText={onUpdateText}
+                                onUpdateLabel={onUpdateLabel}
                                 onActivate={onActivate}
                                 onSetDuration={onSetDuration}
                                 onBuyback={onBuyback}

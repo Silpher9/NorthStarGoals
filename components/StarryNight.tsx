@@ -23,6 +23,22 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
   const textureCacheRef = useRef<Map<string, THREE.Texture>>(new Map());
   const nodesRef = useRef<any[]>([]);
   const physicsFrameRef = useRef(0);
+  
+  // Animation state ref
+  const animationRef = useRef<{
+    frameId: number | null;
+    starData: { x: number; y: number; z: number; speed: number }[];
+    geometry: THREE.BufferGeometry | null;
+    galaxySystem: THREE.Points | null;
+  }>({
+    frameId: null,
+    starData: [],
+    geometry: null,
+    galaxySystem: null
+  });
+  
+  // Track if component is mounted to handle cleanup properly
+  const isMountedRef = useRef(false);
 
   // Update goals ref whenever prop changes to keep it fresh in animate loop
   useEffect(() => {
@@ -142,6 +158,8 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
   // Main ThreeJS Setup
   useEffect(() => {
     if (!mountRef.current) return;
+    
+    isMountedRef.current = true;
 
     // Mobile Optimization: Reduce particle count
     const isMobile = window.innerWidth < 768;
@@ -221,6 +239,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     
     const galaxySystem = new THREE.Points(galaxyGeometry, galaxyMaterial);
     scene.add(galaxySystem);
+    animationRef.current.galaxySystem = galaxySystem;
 
     // --- Star Field (Warp lines) ---
     const geometry = new THREE.BufferGeometry();
@@ -251,6 +270,10 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    
+    // Store starData in ref for animation loop
+    animationRef.current.starData = starData;
+    animationRef.current.geometry = geometry;
 
     const material = new THREE.LineBasicMaterial({
       vertexColors: true,
@@ -262,34 +285,43 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     scene.add(starSystem);
 
     // --- Animation Loop ---
-    let frameId: number;
     const vector = new THREE.Vector3();
     const MIN_DIST = 2.8;
 
     const animate = () => {
-      frameId = requestAnimationFrame(animate);
+      if (!isMountedRef.current) return;
+      
+      animationRef.current.frameId = requestAnimationFrame(animate);
       const time = Date.now() * 0.001;
+      
+      const currentStarData = animationRef.current.starData;
+      const currentGeometry = animationRef.current.geometry;
+      const currentGalaxySystem = animationRef.current.galaxySystem;
 
       // 0. Animate Galaxy
-      galaxySystem.rotation.z = time * 0.01;
+      if (currentGalaxySystem) {
+        currentGalaxySystem.rotation.z = time * 0.01;
+      }
 
       // 1. Animate Background Stars
-      const positionsAttribute = geometry.attributes.position as THREE.BufferAttribute;
-      for (let i = 0; i < starCount; i++) {
-        const star = starData[i];
-        star.z += star.speed;
-        if (star.z > 0) {
-          star.z = -100; 
-          star.x = getSpawnX();
-          star.y = getSpawnY();
+      if (currentGeometry && currentStarData.length > 0) {
+        const positionsAttribute = currentGeometry.attributes.position as THREE.BufferAttribute;
+        for (let i = 0; i < currentStarData.length; i++) {
+          const star = currentStarData[i];
+          star.z += star.speed;
+          if (star.z > 0) {
+            star.z = -100; 
+            star.x = getSpawnX();
+            star.y = getSpawnY();
+          }
+          const streakLength = star.speed * 40; 
+          const headIndex = i * 2;
+          const tailIndex = i * 2 + 1;
+          positionsAttribute.setXYZ(headIndex, star.x, star.y, star.z);
+          positionsAttribute.setXYZ(tailIndex, star.x, star.y, star.z - streakLength);
         }
-        const streakLength = star.speed * 40; 
-        const headIndex = i * 2;
-        const tailIndex = i * 2 + 1;
-        positionsAttribute.setXYZ(headIndex, star.x, star.y, star.z);
-        positionsAttribute.setXYZ(tailIndex, star.x, star.y, star.z - streakLength);
+        positionsAttribute.needsUpdate = true;
       }
-      positionsAttribute.needsUpdate = true;
 
       // 2. Physics Simulation (Throttled)
       // Run for first 120 frames to settle positions
@@ -455,21 +487,36 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     window.addEventListener('resize', handleResize);
 
     return () => {
+      isMountedRef.current = false;
       window.removeEventListener('resize', handleResize);
-      cancelAnimationFrame(frameId);
-      if (mountRef.current && renderer.domElement) {
+      if (animationRef.current.frameId) {
+        cancelAnimationFrame(animationRef.current.frameId);
+        animationRef.current.frameId = null;
+      }
+      // Safely remove canvas
+      if (mountRef.current && renderer.domElement && mountRef.current.contains(renderer.domElement)) {
         mountRef.current.removeChild(renderer.domElement);
       }
+      // Dispose resources
       geometry.dispose();
       galaxyGeometry.dispose();
       material.dispose();
       galaxyMaterial.dispose();
+      renderer.dispose();
+      // Clear refs
+      animationRef.current.starData = [];
+      animationRef.current.geometry = null;
+      animationRef.current.galaxySystem = null;
+      sceneRef.current = null;
+      cameraRef.current = null;
+      rendererRef.current = null;
+      goalGroupRef.current = null;
     };
   }, []);
 
   // Sync Goal Meshes with Props & setup Physics Nodes
   useEffect(() => {
-    if (!goalGroupRef.current) return;
+    if (!goalGroupRef.current || !sceneRef.current || !isMountedRef.current) return;
 
     // 1. Manage Children (Add/Remove)
     const currentMeshIds = new Set(goalGroupRef.current.children.map(c => c.userData.id));

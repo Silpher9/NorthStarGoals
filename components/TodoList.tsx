@@ -347,6 +347,8 @@ interface ProjectViewProps {
     onToggle: (id: string) => void;
     onDelete: (id: string) => void;
     onUpdateDescription: (id: string, description: string) => void;
+    onUpdateText: (id: string, text: string) => void;
+    onUpdateLabel: (id: string, label: string) => void;
     onActivate: (id: string) => void;
     onSetDuration: (id: string, durationMinutes: number) => void;
     onBuyback: (id: string, cost: number) => void;
@@ -364,6 +366,8 @@ const ProjectView: React.FC<ProjectViewProps> = ({
     onToggle, 
     onDelete, 
     onUpdateDescription,
+    onUpdateText,
+    onUpdateLabel,
     onActivate, 
     onSetDuration,
     onBuyback,
@@ -437,6 +441,8 @@ const ProjectView: React.FC<ProjectViewProps> = ({
                         allTodos={allTodos}
                         onAddSubTask={onAddSubTask}
                         onUpdateDescription={onUpdateDescription}
+                        onUpdateText={onUpdateText}
+                        onUpdateLabel={onUpdateLabel}
                         onActivate={onActivate}
                         onSetDuration={onSetDuration}
                         onBuyback={onBuyback}
@@ -458,6 +464,8 @@ const ProjectView: React.FC<ProjectViewProps> = ({
                                 allTodos={allTodos}
                                 onAddSubTask={onAddSubTask}
                                 onUpdateDescription={onUpdateDescription}
+                                onUpdateText={onUpdateText}
+                                onUpdateLabel={onUpdateLabel}
                                 onActivate={onActivate}
                                 onSetDuration={onSetDuration}
                                 onBuyback={onBuyback}
@@ -490,6 +498,8 @@ interface GoalManagementViewProps {
     onActivate: (id: string) => void;
     onSetDuration: (id: string, durationMinutes: number) => void;
     onUpdateDescription: (id: string, description: string) => void;
+    onUpdateText: (id: string, text: string) => void;
+    onUpdateLabel: (id: string, label: string) => void;
     onBuyback: (id: string, cost: number) => void;
     onBreakDown: (id: string) => Promise<void>;
     onAddSubTask: (parentId: string, text: string) => void;
@@ -510,6 +520,8 @@ const GoalManagementView: React.FC<GoalManagementViewProps> = ({
     onActivate,
     onSetDuration,
     onUpdateDescription,
+    onUpdateText,
+    onUpdateLabel,
     onBuyback,
     onBreakDown,
     onAddSubTask,
@@ -651,6 +663,8 @@ const GoalManagementView: React.FC<GoalManagementViewProps> = ({
                                 allTodos={todos}
                                 onAddSubTask={onAddSubTask}
                                 onUpdateDescription={onUpdateDescription}
+                                onUpdateText={onUpdateText}
+                                onUpdateLabel={onUpdateLabel}
                                 onActivate={onActivate}
                                 onSetDuration={onSetDuration}
                                 onBuyback={onBuyback}
@@ -1034,6 +1048,14 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
   const updateDescription = useCallback((id: string, description: string) => {
       setTodos(prev => prev.map(t => t.id === id ? { ...t, description } : t));
   }, []);
+
+  const updateText = useCallback((id: string, text: string) => {
+      setTodos(prev => prev.map(t => t.id === id ? { ...t, text } : t));
+  }, []);
+
+  const updateLabel = useCallback((id: string, customLabel: string) => {
+      setTodos(prev => prev.map(t => t.id === id ? { ...t, customLabel: customLabel || undefined } : t));
+  }, []);
   
   const activateTask = useCallback((id: string) => {
       const now = new Date();
@@ -1329,6 +1351,8 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
                 onToggle={toggleTodo}
                 onDelete={deleteTodo}
                 onUpdateDescription={updateDescription}
+                onUpdateText={updateText}
+                onUpdateLabel={updateLabel}
                 onActivate={activateTask}
                 onSetDuration={setTaskDuration}
                 onBuyback={buybackTask}
@@ -1390,6 +1414,8 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
                 onActivate={activateTask}
                 onSetDuration={setTaskDuration}
                 onUpdateDescription={updateDescription}
+                onUpdateText={updateText}
+                onUpdateLabel={updateLabel}
                 onBuyback={buybackTask}
                 onBreakDown={handleBreakDown}
                 onAddSubTask={handleAddSubTask}
@@ -1451,6 +1477,8 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
                             allTodos={todos}
                             // Removed onAddSubTask to prevent creating tasks in Today view
                             onUpdateDescription={updateDescription}
+                            onUpdateText={updateText}
+                            onUpdateLabel={updateLabel}
                             onActivate={activateTask}
                             onSetDuration={setTaskDuration}
                             onBuyback={buybackTask}
