@@ -402,7 +402,8 @@ const TodoItem: React.FC<TodoItemProps> = ({
     });
   };
 
-  if (visibleIds && !visibleIds.has(todo.id)) return null;
+  // Note: Visibility filtering is handled by the parent component via `visibleSubTasks`
+  // (see lines 158-161). No need to check `visibleIds` here.
 
   return (
     <div className={`mb-3 transition-all duration-300`}>
