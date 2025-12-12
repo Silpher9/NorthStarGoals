@@ -4,7 +4,8 @@ import App from './App';
 // import './index.css';  <-- DELETE THIS LINE
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
+  // Temporarily disabled StrictMode to fix Three.js animation
+  // <React.StrictMode>
     <App />
-  </React.StrictMode>
+  // </React.StrictMode>
 );
