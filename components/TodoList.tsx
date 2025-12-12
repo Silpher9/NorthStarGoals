@@ -10,7 +10,7 @@ const StatsView = React.lazy(() => import('./StatsView'));
 const SettingsView = React.lazy(() => import('./SettingsView'));
 const NotesView = React.lazy(() => import('./NotesView'));
 
-type Tab = 'today' | 'completed' | 'failed' | 'archive' | 'goals' | 'notes' | 'stats' | 'settings';
+type Tab = 'today' | 'completed' | 'graveyard' | 'archive' | 'goals' | 'notes' | 'stats' | 'settings';
 type GoalTier = 'gold' | 'silver' | 'bronze';
 
 // Threshold for auto-archiving (30 days in ms)
@@ -1507,7 +1507,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
             </div>
         )}
 
-        {activeTab === 'failed' && (
+        {activeTab === 'graveyard' && (
             <div className="h-full overflow-y-auto p-4 pb-20">
                 <h2 className="text-lg font-light text-white tracking-[0.2em] uppercase mb-6 pl-2 border-l-2 border-red-500">Graveyard</h2>
                 {failedTodos.map(todo => (
