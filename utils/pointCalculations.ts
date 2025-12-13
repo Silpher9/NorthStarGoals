@@ -3,10 +3,10 @@ import { Todo } from '../types';
 // === CONSTANTS ===
 
 export const TIER_MULTIPLIERS = {
-  gold: 4,
-  silver: 3,
-  bronze: 2,
-  normal: 1
+  gold: 10,
+  silver: 8,
+  bronze: 6,
+  normal: 5
 } as const;
 
 export type Tier = keyof typeof TIER_MULTIPLIERS;
@@ -54,7 +54,7 @@ export function getTierMultiplier(tier: Tier): number {
  * Formula: quarterHours * tierMultiplier * velocityMultiplier
  * 
  * @param durationMinutes - Duration in minutes (defaults to 15 if not set)
- * @param tierMultiplier - Tier multiplier (1-4 based on gold/silver/bronze/normal)
+ * @param tierMultiplier - Tier multiplier (5-10 based on gold/silver/bronze/normal)
  * @param velocityMultiplier - Velocity/streak multiplier (defaults to 1.0)
  */
 export function calculateTaskPoints(
