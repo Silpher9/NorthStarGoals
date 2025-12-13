@@ -164,6 +164,11 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     
     // Set mounted flag FIRST before any setup
     isMountedRef.current = true;
+
+    // StrictMode safety: effect can mount/unmount/mount rapidly in dev.
+    // A requestAnimationFrame callback that is already executing cannot be cancelled,
+    // so we use a local cancellation flag that the callback checks *again* before doing Three.js work.
+    let cancelled = false;
     
     // Clear any stale refs from previous mount (StrictMode safety)
     animationRef.current = {
@@ -338,7 +343,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     const MIN_DIST = 2.8;
 
     const animate = () => {
-      if (!isMountedRef.current) return;
+      if (cancelled || !isMountedRef.current) return;
       
       animationRef.current.frameId = requestAnimationFrame(animate);
       const nowMs = performance.now();
@@ -502,7 +507,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
       }
 
       // 4. Animate Goal Labels
-      if (goalGroupRef.current && cameraRef.current && mountRef.current) {
+      if (!cancelled && isMountedRef.current && goalGroupRef.current && cameraRef.current && mountRef.current) {
         goalGroupRef.current.children.forEach((child) => {
             if (child.userData.type !== 'star') return;
 
@@ -519,8 +524,10 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
                 child.getWorldPosition(vector);
                 vector.project(cameraRef.current);
 
-                const x = (vector.x * 0.5 + 0.5) * mountRef.current!.clientWidth;
-                const y = (-(vector.y * 0.5) + 0.5) * mountRef.current!.clientHeight;
+                const mount = mountRef.current;
+                if (!mount) return;
+                const x = (vector.x * 0.5 + 0.5) * mount.clientWidth;
+                const y = (-(vector.y * 0.5) + 0.5) * mount.clientHeight;
 
                 let vOffset = 20;
                 if (tier === 'gold') vOffset = 30;
@@ -533,6 +540,11 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
         });
       }
 
+      // In React StrictMode dev, cleanup can run immediately after setup,
+      // and an in-flight frame may reach here while resources are being disposed.
+      // Re-check mounted/cancelled right before touching Three.js objects.
+      if (cancelled || !isMountedRef.current) return;
+
       // Clear and render
       renderer.setClearColor(0x000000, 0); // Transparent background
       renderer.clear();
@@ -542,6 +554,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     animate();
 
     const handleResize = () => {
+      if (cancelled || !isMountedRef.current) return;
       if (!mountRef.current) return;
       const width = mountRef.current.clientWidth;
       const height = mountRef.current.clientHeight;
@@ -553,6 +566,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     window.addEventListener('resize', handleResize);
 
     return () => {
+      cancelled = true;
       isMountedRef.current = false;
       
       window.removeEventListener('resize', handleResize);
