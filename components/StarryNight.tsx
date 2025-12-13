@@ -566,7 +566,9 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
 
   // Sync Goal Meshes with Props & setup Physics Nodes
   useEffect(() => {
-    if (!goalGroupRef.current || !sceneRef.current) return;
+    // Check isMountedRef to prevent race conditions in React StrictMode
+    // where this effect could run during unmount/remount transitions
+    if (!isMountedRef.current || !goalGroupRef.current || !sceneRef.current) return;
 
     // 1. Manage Children (Add/Remove)
     const currentMeshIds = new Set(goalGroupRef.current.children.map(c => c.userData.id));
