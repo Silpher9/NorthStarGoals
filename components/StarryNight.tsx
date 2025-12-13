@@ -174,7 +174,10 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     // Mobile Optimization: Reduce particle count
     const isMobile = window.innerWidth < 768;
     const galaxyCount = isMobile ? 1000 : 4000;
-    const starCount = isMobile ? 500 : 1500;
+
+    // "Stars coming towards you" (warp lines) — tuned to be calmer:
+    // fewer particles and dimmer overall.
+    const starCount = isMobile ? 250 : 800;
 
     // Scene Setup
     const scene = new THREE.Scene();
@@ -287,14 +290,15 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
 
       starData.push({ x, y, z, speed });
 
-      // Make stars brighter and more visible
-      const brightness = Math.random() * 0.5 + 0.5; // 0.5 to 1.0 (was 0.1 to 0.5)
+      // Dimmer stars (calmer warp effect)
+      const brightness = Math.random() * 0.3 + 0.15; // 0.15 to 0.45
       colors[i * 6 + 0] = brightness;
       colors[i * 6 + 1] = brightness;
-      colors[i * 6 + 2] = Math.min(1.0, brightness + 0.3); // Slight blue tint
-      colors[i * 6 + 3] = 0.2; // Tail brighter too (was 0.05)
-      colors[i * 6 + 4] = 0.2;
-      colors[i * 6 + 5] = 0.3;
+      colors[i * 6 + 2] = Math.min(1.0, brightness + 0.15); // Slight blue tint
+      // Tail is dimmer than head
+      colors[i * 6 + 3] = 0.04;
+      colors[i * 6 + 4] = 0.04;
+      colors[i * 6 + 5] = 0.06;
     }
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -307,7 +311,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     const material = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.9, // Increased from 0.6 for better visibility
+      opacity: 0.55,
     });
 
     const starSystem = new THREE.LineSegments(geometry, material);
