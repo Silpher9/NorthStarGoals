@@ -28,11 +28,13 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
   // Animation state ref
   const animationRef = useRef<{
     frameId: number | null;
-    starData: { x: number; y: number; z: number; speed: number }[];
+    lastTimeMs: number;
+    starData: { x: number; y: number; z: number; speedFactor: number }[];
     geometry: THREE.BufferGeometry | null;
     galaxySystem: THREE.Points | null;
   }>({
     frameId: null,
+    lastTimeMs: 0,
     starData: [],
     geometry: null,
     galaxySystem: null
@@ -166,6 +168,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     // Clear any stale refs from previous mount (StrictMode safety)
     animationRef.current = {
       frameId: null,
+      lastTimeMs: 0,
       starData: [],
       geometry: null,
       galaxySystem: null
@@ -275,20 +278,33 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(starCount * 2 * 3);
     const colors = new Float32Array(starCount * 2 * 3);
-    const starData: { x: number; y: number; z: number; speed: number }[] = [];
+    const starData: { x: number; y: number; z: number; speedFactor: number }[] = [];
 
-    const getSpawnZ = () => -Math.random() * 80 - 20; 
-    const getSpawnX = () => (Math.random() - 0.5) * 100;
-    const getSpawnY = () => (Math.random() - 0.5) * 60;
+    // Spawn volume / speed tuning for "stars coming towards you"
+    const STAR_Z_FAR = -100;
+    const STAR_Z_NEAR = 0;
+    const getSpawnZ = () => -Math.random() * 80 - 20; // -20 .. -100
+
+    // Ensure stars don't spawn too close to dead-center; otherwise some appear stationary.
+    const getSpawnXY = () => {
+      let x = 0;
+      let y = 0;
+      // Manhattan distance threshold keeps distribution fast while avoiding the near-center "stuck" look.
+      // (Perspective projection makes near-center stars move very little on-screen.)
+      do {
+        x = (Math.random() - 0.5) * 100;
+        y = (Math.random() - 0.5) * 60;
+      } while (Math.abs(x) + Math.abs(y) < 6);
+      return { x, y };
+    };
 
     for (let i = 0; i < starCount; i++) {
-      const x = getSpawnX();
-      const y = getSpawnY();
+      const { x, y } = getSpawnXY();
       const z = getSpawnZ();
-      // Balanced speed for smooth warp effect (0.03-0.12)
-      const speed = Math.random() * 0.09 + 0.03; 
+      // Per-star variation that we apply on top of a depth-based speed curve.
+      const speedFactor = Math.random() * 0.8 + 0.6; // 0.6 .. 1.4
 
-      starData.push({ x, y, z, speed });
+      starData.push({ x, y, z, speedFactor });
 
       // Dimmer stars (calmer warp effect)
       const brightness = Math.random() * 0.3 + 0.15; // 0.15 to 0.45
@@ -325,7 +341,11 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
       if (!isMountedRef.current) return;
       
       animationRef.current.frameId = requestAnimationFrame(animate);
-      const time = Date.now() * 0.001;
+      const nowMs = performance.now();
+      const prevMs = animationRef.current.lastTimeMs || nowMs;
+      animationRef.current.lastTimeMs = nowMs;
+      const dt = Math.min(0.05, (nowMs - prevMs) / 1000); // clamp to avoid huge jumps
+      const time = nowMs * 0.001;
       
       // Get refs with null safety
       const currentStarData = animationRef.current.starData || [];
@@ -342,13 +362,22 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
         const positionsAttribute = currentGeometry.attributes.position as THREE.BufferAttribute;
         for (let i = 0; i < currentStarData.length; i++) {
           const star = currentStarData[i];
-          star.z += star.speed;
-          if (star.z > 0) {
-            star.z = -100; 
-            star.x = getSpawnX();
-            star.y = getSpawnY();
+
+          // Depth-based speed: far stars drift slowly, near stars streak fast.
+          // Normalize z into 0..1 where 0 is far and 1 is near camera.
+          const depthT = THREE.MathUtils.clamp((star.z - STAR_Z_FAR) / (STAR_Z_NEAR - STAR_Z_FAR), 0, 1);
+          const eased = depthT * depthT; // ease-in: slow far away, faster as it approaches
+          const baseSpeed = THREE.MathUtils.lerp(0.015, 0.28, eased); // units per ~60fps frame (after dt scaling)
+          const speed = baseSpeed * star.speedFactor * (dt * 60);
+
+          star.z += speed;
+          if (star.z > STAR_Z_NEAR) {
+            star.z = getSpawnZ();
+            const { x, y } = getSpawnXY();
+            star.x = x;
+            star.y = y;
           }
-          const streakLength = star.speed * 40; 
+          const streakLength = speed * 45;
           const headIndex = i * 2;
           const tailIndex = i * 2 + 1;
           positionsAttribute.setXYZ(headIndex, star.x, star.y, star.z);
