@@ -4,6 +4,15 @@ import TodoItem from './TodoItem';
 import RoutineManager from './RoutineManager';
 import { Todo, Note, Routine } from '../types';
 import { breakDownTask, generateTasksFromNote } from '../services/geminiService';
+import { 
+    createSyncRoom, 
+    joinSyncRoom, 
+    pushChanges, 
+    subscribeToChanges, 
+    disconnectSync,
+    isSyncEnabled,
+    SyncData
+} from '../services/syncService';
 
 // Lazy load heavy components
 const StatsView = React.lazy(() => import('./StatsView'));
@@ -809,6 +818,13 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
 
   const [activeTab, setActiveTab] = useState<Tab>('today');
   const [viewingGoalId, setViewingGoalId] = useState<string | null>(null);
+  
+  // Sync state
+  const [syncStatus, setSyncStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>(() => 
+    isSyncEnabled() ? 'connected' : 'disconnected'
+  );
+  const syncUnsubscribeRef = useRef<(() => void) | null>(null);
+  const isRemoteUpdateRef = useRef(false); // Flag to prevent push loops
 
   // Used label suggestions (for Orbit label dropdowns)
   const labelOptions = useMemo(() => {
@@ -1006,6 +1022,144 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
     const interval = setInterval(checkArchival, 60 * 60 * 1000); 
     return () => clearInterval(interval);
   }, []);
+
+  // --- CLOUD SYNC LOGIC ---
+  
+  // Set up real-time listener on mount if already connected
+  useEffect(() => {
+    if (isSyncEnabled()) {
+      setSyncStatus('connecting');
+      const unsubscribe = subscribeToChanges(
+        (data: SyncData) => {
+          // Mark that this is a remote update to prevent push loop
+          isRemoteUpdateRef.current = true;
+          
+          // Update local state with remote data
+          if (data.todos) setTodos(data.todos);
+          if (data.routines) setRoutines(data.routines);
+          if (data.notes) setNotes(data.notes);
+          
+          // Reset flag after a short delay (allows state to settle)
+          setTimeout(() => {
+            isRemoteUpdateRef.current = false;
+          }, 100);
+        },
+        (error) => {
+          console.error('Sync error:', error);
+          setSyncStatus('error');
+        }
+      );
+      
+      if (unsubscribe) {
+        syncUnsubscribeRef.current = unsubscribe;
+        setSyncStatus('connected');
+      } else {
+        setSyncStatus('error');
+      }
+    }
+    
+    return () => {
+      if (syncUnsubscribeRef.current) {
+        syncUnsubscribeRef.current();
+        syncUnsubscribeRef.current = null;
+      }
+    };
+  }, []);
+
+  // Debounced push to cloud when local data changes
+  useEffect(() => {
+    // Skip if this is a remote update (prevents infinite loop)
+    if (isRemoteUpdateRef.current) return;
+    
+    // Skip if sync is not enabled
+    if (!isSyncEnabled()) return;
+    
+    // Debounce the push to avoid too many writes
+    const timeout = setTimeout(() => {
+      pushChanges({ todos, routines, notes }).catch(err => {
+        console.error('Failed to push changes:', err);
+      });
+    }, 500); // 500ms debounce
+    
+    return () => clearTimeout(timeout);
+  }, [todos, routines, notes]);
+
+  // Sync handlers
+  const handleEnableSync = useCallback(async (code: string): Promise<boolean> => {
+    setSyncStatus('connecting');
+    
+    const success = await createSyncRoom(code, { todos, routines, notes });
+    
+    if (success) {
+      // Set up real-time listener
+      const unsubscribe = subscribeToChanges(
+        (data: SyncData) => {
+          isRemoteUpdateRef.current = true;
+          if (data.todos) setTodos(data.todos);
+          if (data.routines) setRoutines(data.routines);
+          if (data.notes) setNotes(data.notes);
+          setTimeout(() => { isRemoteUpdateRef.current = false; }, 100);
+        },
+        () => setSyncStatus('error')
+      );
+      
+      if (unsubscribe) {
+        syncUnsubscribeRef.current = unsubscribe;
+      }
+      setSyncStatus('connected');
+      return true;
+    }
+    
+    setSyncStatus('error');
+    return false;
+  }, [todos, routines, notes]);
+
+  const handleJoinSync = useCallback(async (code: string): Promise<boolean> => {
+    setSyncStatus('connecting');
+    
+    const data = await joinSyncRoom(code);
+    
+    if (data) {
+      // Update local state with remote data
+      isRemoteUpdateRef.current = true;
+      if (data.todos) setTodos(data.todos);
+      if (data.routines) setRoutines(data.routines);
+      if (data.notes) setNotes(data.notes);
+      setTimeout(() => { isRemoteUpdateRef.current = false; }, 100);
+      
+      // Set up real-time listener
+      const unsubscribe = subscribeToChanges(
+        (remoteData: SyncData) => {
+          isRemoteUpdateRef.current = true;
+          if (remoteData.todos) setTodos(remoteData.todos);
+          if (remoteData.routines) setRoutines(remoteData.routines);
+          if (remoteData.notes) setNotes(remoteData.notes);
+          setTimeout(() => { isRemoteUpdateRef.current = false; }, 100);
+        },
+        () => setSyncStatus('error')
+      );
+      
+      if (unsubscribe) {
+        syncUnsubscribeRef.current = unsubscribe;
+      }
+      setSyncStatus('connected');
+      return true;
+    }
+    
+    setSyncStatus('disconnected');
+    return false;
+  }, []);
+
+  const handleDisconnectSync = useCallback(() => {
+    if (syncUnsubscribeRef.current) {
+      syncUnsubscribeRef.current();
+      syncUnsubscribeRef.current = null;
+    }
+    disconnectSync();
+    setSyncStatus('disconnected');
+  }, []);
+
+  // --- END CLOUD SYNC LOGIC ---
 
   const addTodo = useCallback((text: string, label: 'goal' | 'normal' = 'normal', parentId?: string, goalCategory?: string, customLabel?: string) => {
     setTodos(prev => {
@@ -1366,13 +1520,16 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
   }, []);
   
   const clearAll = useCallback(() => {
+      // Disconnect sync first to avoid pushing empty data
+      handleDisconnectSync();
+      
       setTodos([]);
       setRoutines([]);
       setNotes([]);
       localStorage.removeItem('todos');
       localStorage.removeItem('routines');
       localStorage.removeItem('notes');
-  }, []);
+  }, [handleDisconnectSync]);
 
   // View Logic
   const activeTodos = useMemo(() => {
@@ -1666,7 +1823,15 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
 
         {activeTab === 'settings' && (
             <React.Suspense fallback={<LoadingSpinner />}>
-                <SettingsView onExport={handleExport} onImport={handleImport} onClear={clearAll} />
+                <SettingsView 
+                    onExport={handleExport} 
+                    onImport={handleImport} 
+                    onClear={clearAll}
+                    onEnableSync={handleEnableSync}
+                    onJoinSync={handleJoinSync}
+                    onDisconnectSync={handleDisconnectSync}
+                    syncStatus={syncStatus}
+                />
             </React.Suspense>
         )}
       </div>
