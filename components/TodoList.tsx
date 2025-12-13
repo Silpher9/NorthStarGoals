@@ -92,10 +92,20 @@ interface ProjectTaskFormProps {
     onAdd: (text: string, label?: string) => void;
     goalText: string;
     style: { border: string; bg: string };
+    labelOptions?: string[];
 }
-const ProjectTaskForm: React.FC<ProjectTaskFormProps> = ({ onAdd, goalText, style }) => {
+const ProjectTaskForm: React.FC<ProjectTaskFormProps> = ({ onAdd, goalText, style, labelOptions = [] }) => {
     const [input, setInput] = useState('');
     const [label, setLabel] = useState('');
+    const [isLabelMenuOpen, setIsLabelMenuOpen] = useState(false);
+    const [labelMenuIndex, setLabelMenuIndex] = useState(0);
+
+    const filteredLabelOptions = useMemo(() => {
+        const q = label.trim().toLowerCase();
+        const opts = (labelOptions || []).filter(Boolean);
+        if (!q) return opts;
+        return opts.filter(opt => opt.toLowerCase().includes(q));
+    }, [label, labelOptions]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -103,21 +113,83 @@ const ProjectTaskForm: React.FC<ProjectTaskFormProps> = ({ onAdd, goalText, styl
             onAdd(input.trim(), label.trim() || undefined);
             setInput('');
             setLabel('');
+            setIsLabelMenuOpen(false);
+            setLabelMenuIndex(0);
+        }
+    };
+
+    const handleLabelKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setIsLabelMenuOpen(true);
+            if (filteredLabelOptions.length > 0) {
+                setLabelMenuIndex(i => Math.min(i + 1, filteredLabelOptions.length - 1));
+            }
+            return;
+        }
+        if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setIsLabelMenuOpen(true);
+            if (filteredLabelOptions.length > 0) {
+                setLabelMenuIndex(i => Math.max(i - 1, 0));
+            }
+            return;
+        }
+        if (e.key === 'Enter') {
+            if (isLabelMenuOpen && filteredLabelOptions[labelMenuIndex]) {
+                e.preventDefault();
+                setLabel(filteredLabelOptions[labelMenuIndex]);
+                setIsLabelMenuOpen(false);
+            }
+            return;
+        }
+        if (e.key === 'Escape') {
+            if (isLabelMenuOpen) {
+                e.preventDefault();
+                setIsLabelMenuOpen(false);
+            }
         }
     };
 
     return (
         <div className={`bg-slate-900/95 md:bg-slate-800/90 md:backdrop-blur-md p-3 rounded-2xl border ${style.border} shadow-xl flex flex-col gap-2`}>
             <form onSubmit={handleSubmit} className="flex flex-col gap-0">
-                 <div className={`flex items-center gap-2 px-2 pb-2 border-b border-slate-700/50 mb-2`}>
+                 <div className={`relative flex items-center gap-2 px-2 pb-2 border-b border-slate-700/50 mb-2`}>
                      <Tag size={12} className="text-slate-500" />
                      <input
                         type="text"
                         value={label}
-                        onChange={(e) => setLabel(e.target.value)}
+                        onChange={(e) => { setLabel(e.target.value); setIsLabelMenuOpen(true); }}
+                        onFocus={() => setIsLabelMenuOpen(true)}
+                        onBlur={() => setIsLabelMenuOpen(false)}
+                        onKeyDown={handleLabelKeyDown}
                         placeholder="Label (optional)..."
                         className="bg-transparent text-slate-300 placeholder-slate-500 text-xs focus:outline-none w-full"
                      />
+
+                    {isLabelMenuOpen && filteredLabelOptions.length > 0 && (
+                        <div
+                            className="absolute left-0 top-full mt-2 w-full max-h-44 overflow-auto rounded-xl border border-slate-700/70 bg-slate-950/95 backdrop-blur shadow-2xl z-50"
+                            onMouseDown={(e) => e.preventDefault()}
+                        >
+                            {filteredLabelOptions.slice(0, 20).map((opt, idx) => (
+                                <button
+                                    key={opt}
+                                    type="button"
+                                    onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        setLabel(opt);
+                                        setIsLabelMenuOpen(false);
+                                    }}
+                                    className={`w-full text-left px-3 py-2 text-[10px] uppercase font-bold tracking-wider transition-colors ${
+                                        idx === labelMenuIndex ? 'bg-indigo-600/30 text-indigo-200' : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
+                                    }`}
+                                >
+                                    {opt}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -355,6 +427,7 @@ interface ProjectViewProps {
     goal: Todo;
     tasks: Todo[];
     allTodos: Todo[];
+    labelOptions?: string[];
     onBack: () => void;
     onAddTask: (text: string, customLabel?: string) => void;
     onAddSubTask: (parentId: string, text: string) => void;
@@ -374,6 +447,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({
     goal, 
     tasks, 
     allTodos,
+    labelOptions,
     onBack, 
     onAddTask, 
     onAddSubTask,
@@ -453,6 +527,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({
                         onToggle={onToggle} 
                         onDelete={onDelete}
                         allTodos={allTodos}
+                        labelOptions={labelOptions}
                         onAddSubTask={onAddSubTask}
                         onUpdateDescription={onUpdateDescription}
                         onUpdateText={onUpdateText}
@@ -476,6 +551,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({
                                 onToggle={onToggle} 
                                 onDelete={onDelete}
                                 allTodos={allTodos}
+                                labelOptions={labelOptions}
                                 onAddSubTask={onAddSubTask}
                                 onUpdateDescription={onUpdateDescription}
                                 onUpdateText={onUpdateText}
@@ -494,7 +570,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({
 
             {/* Input Area */}
             <div className="absolute bottom-0 left-0 w-full p-4 bg-gradient-to-t from-[#0f172a] via-[#0f172a] to-transparent z-20">
-                <ProjectTaskForm onAdd={onAddTask} goalText={goal.text} style={s} />
+                <ProjectTaskForm onAdd={onAddTask} goalText={goal.text} style={s} labelOptions={labelOptions} />
             </div>
         </div>
     );
@@ -503,6 +579,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({
 interface GoalManagementViewProps {
     todos: Todo[];
     routines: Routine[];
+    labelOptions?: string[];
     onAddGoal: (text: string, tier: GoalTier) => void;
     onAddNormal: (text: string) => void;
     onDelete: (id: string) => void;
@@ -526,6 +603,7 @@ interface GoalManagementViewProps {
 const GoalManagementView: React.FC<GoalManagementViewProps> = ({ 
     todos, 
     routines,
+    labelOptions,
     onAddGoal, 
     onAddNormal, 
     onDelete, 
@@ -675,6 +753,7 @@ const GoalManagementView: React.FC<GoalManagementViewProps> = ({
                                 onToggle={onToggle} 
                                 onDelete={onDelete}
                                 allTodos={todos}
+                                labelOptions={labelOptions}
                                 onAddSubTask={onAddSubTask}
                                 onUpdateDescription={onUpdateDescription}
                                 onUpdateText={onUpdateText}
@@ -730,6 +809,19 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
 
   const [activeTab, setActiveTab] = useState<Tab>('today');
   const [viewingGoalId, setViewingGoalId] = useState<string | null>(null);
+
+  // Used label suggestions (for Orbit label dropdowns)
+  const labelOptions = useMemo(() => {
+      // Deduplicate case-insensitively but keep first-seen casing.
+      const map = new Map<string, string>();
+      for (const t of todos) {
+          const raw = (t.customLabel || '').trim();
+          if (!raw) continue;
+          const key = raw.toLowerCase();
+          if (!map.has(key)) map.set(key, raw);
+      }
+      return Array.from(map.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [todos]);
   
   // Onboarding State
   const [showMissionBriefing, setShowMissionBriefing] = useState(() => {
@@ -1348,6 +1440,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
                 goal={goal}
                 tasks={todos.filter(t => t.parentId === goal.id && t.status !== 'graveyard')}
                 allTodos={todos}
+                labelOptions={labelOptions}
                 onBack={() => setViewingGoalId(null)}
                 // Use a closure here to pass current ID without breaking hook rules
                 onAddTask={(text, label) => addTodo(text, 'normal', goal.id, undefined, label)}
@@ -1410,6 +1503,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
             <GoalManagementView 
                 todos={todos} 
                 routines={routines}
+                labelOptions={labelOptions}
                 onAddGoal={handleAddGoal} 
                 onAddNormal={handleAddNormal}
                 onDelete={deleteTodo} 
@@ -1479,6 +1573,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
                             onToggle={toggleTodo} 
                             onDelete={deleteTodo} 
                             allTodos={todos}
+                            labelOptions={labelOptions}
                             // Removed onAddSubTask to prevent creating tasks in Today view
                             onUpdateDescription={updateDescription}
                             onUpdateText={updateText}

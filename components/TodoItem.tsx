@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { Todo } from '../types';
 import { Trash2, Check, Clock, Trophy, FolderOpen, ChevronRight, ChevronDown, Plus, CornerDownRight, AlignLeft, Layers, Zap, Tag, Lock, Timer, RefreshCcw, Play, Pause, Archive, RotateCcw, X as XIcon, Edit3, Rocket, Eye, EyeOff, Flame } from 'lucide-react';
 import RichTextEditor from './RichTextEditor';
@@ -16,6 +16,7 @@ interface TodoItemProps {
   onDelete: (id: string) => void;
   parentTier?: string;
   allTodos?: Todo[];
+  labelOptions?: string[];
   onAddSubTask?: (parentId: string, text: string) => void;
   onUpdateDescription?: (id: string, description: string) => void;
   onUpdateText?: (id: string, text: string) => void;
@@ -36,6 +37,7 @@ const TodoItem: React.FC<TodoItemProps> = ({
   onDelete, 
   parentTier,
   allTodos,
+  labelOptions,
   onAddSubTask,
   onUpdateDescription,
   onUpdateText,
@@ -70,6 +72,9 @@ const TodoItem: React.FC<TodoItemProps> = ({
   const [editedTitle, setEditedTitle] = useState(todo.text);
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [editedLabel, setEditedLabel] = useState(todo.customLabel || '');
+  const [isLabelMenuOpen, setIsLabelMenuOpen] = useState(false);
+  const [labelMenuIndex, setLabelMenuIndex] = useState(0);
+  const labelInputRef = useRef<HTMLInputElement | null>(null);
 
   // Local Timer State for visual countdown
   const [timeLeftString, setTimeLeftString] = useState<string | null>(null);
@@ -87,6 +92,42 @@ const TodoItem: React.FC<TodoItemProps> = ({
   useEffect(() => {
     setEditedLabel(todo.customLabel || '');
   }, [todo.customLabel]);
+
+  const derivedLabelOptions = useMemo(() => {
+    // If parent provided label options, trust that.
+    if (labelOptions && labelOptions.length > 0) return labelOptions;
+    if (!allTodos) return [];
+
+    // Deduplicate case-insensitively but keep first-seen casing.
+    const map = new Map<string, string>();
+    for (const t of allTodos) {
+      const raw = (t.customLabel || '').trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      if (!map.has(key)) map.set(key, raw);
+    }
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [allTodos, labelOptions]);
+
+  const filteredLabelOptions = useMemo(() => {
+    // If user hasn't started changing the label yet, show full list on open (so clicking a label reveals all).
+    const current = (todo.customLabel || '').trim();
+    if (isLabelMenuOpen && editedLabel.trim() === current) return derivedLabelOptions;
+
+    const q = editedLabel.trim().toLowerCase();
+    if (!q) return derivedLabelOptions;
+    return derivedLabelOptions.filter(opt => opt.toLowerCase().includes(q));
+  }, [derivedLabelOptions, editedLabel, isLabelMenuOpen, todo.customLabel]);
+
+  // Keep highlight index valid as filter changes
+  useEffect(() => {
+    if (!isLabelMenuOpen) return;
+    if (filteredLabelOptions.length === 0) {
+      setLabelMenuIndex(0);
+      return;
+    }
+    setLabelMenuIndex(prev => Math.max(0, Math.min(prev, filteredLabelOptions.length - 1)));
+  }, [filteredLabelOptions.length, isLabelMenuOpen]);
 
   const isGraveyard = todo.status === 'graveyard';
   const isArchived = todo.status === 'archive';
@@ -344,16 +385,52 @@ const TodoItem: React.FC<TodoItemProps> = ({
           onUpdateLabel(todo.id, editedLabel.trim());
       }
       setIsEditingLabel(false);
+      setIsLabelMenuOpen(false);
   };
 
-  const handleLabelKeyDown = (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter') {
-          e.preventDefault();
-          handleLabelSave();
-      } else if (e.key === 'Escape') {
-          setEditedLabel(todo.customLabel || '');
-          setIsEditingLabel(false);
+  const commitLabelOption = useCallback((value: string) => {
+    if (onUpdateLabel) onUpdateLabel(todo.id, value.trim());
+    setEditedLabel(value);
+    setIsEditingLabel(false);
+    setIsLabelMenuOpen(false);
+  }, [onUpdateLabel, todo.id]);
+
+  const handleLabelKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setIsLabelMenuOpen(true);
+      if (filteredLabelOptions.length > 0) {
+        setLabelMenuIndex(i => Math.min(i + 1, filteredLabelOptions.length - 1));
       }
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setIsLabelMenuOpen(true);
+      if (filteredLabelOptions.length > 0) {
+        setLabelMenuIndex(i => Math.max(i - 1, 0));
+      }
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (isLabelMenuOpen && filteredLabelOptions[labelMenuIndex]) {
+        commitLabelOption(filteredLabelOptions[labelMenuIndex]);
+      } else {
+        handleLabelSave();
+      }
+      return;
+    }
+    if (e.key === 'Escape') {
+      if (isLabelMenuOpen) {
+        e.preventDefault();
+        setIsLabelMenuOpen(false);
+        return;
+      }
+      setEditedLabel(todo.customLabel || '');
+      setIsEditingLabel(false);
+      setIsLabelMenuOpen(false);
+    }
   };
 
   const handleSetTimerClick = () => {
@@ -514,22 +591,59 @@ const TodoItem: React.FC<TodoItemProps> = ({
 
                         {!isGraveyard && !isArchived && (
                             isEditingLabel ? (
-                                <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                                <div className="relative flex items-center gap-1" onClick={e => e.stopPropagation()}>
                                     <Tag size={8} className="text-indigo-400" />
                                     <input
+                                        ref={labelInputRef}
                                         type="text"
                                         value={editedLabel}
-                                        onChange={(e) => setEditedLabel(e.target.value)}
-                                        onBlur={handleLabelSave}
+                                        onChange={(e) => { setEditedLabel(e.target.value); setIsLabelMenuOpen(true); }}
+                                        onFocus={() => { setIsLabelMenuOpen(true); }}
+                                        onBlur={() => { handleLabelSave(); }}
                                         onKeyDown={handleLabelKeyDown}
-                                        className="bg-slate-900 border border-indigo-500/50 rounded px-1.5 py-0.5 text-[9px] uppercase font-bold tracking-wider text-indigo-300 focus:outline-none focus:border-indigo-400 w-20"
+                                        className="bg-slate-900 border border-indigo-500/50 rounded px-1.5 py-0.5 text-[9px] uppercase font-bold tracking-wider text-indigo-300 focus:outline-none focus:border-indigo-400 w-24"
                                         placeholder="Label"
                                         autoFocus
+                                        aria-label="Task label"
+                                        aria-expanded={isLabelMenuOpen}
+                                        aria-autocomplete="list"
                                     />
+
+                                    {isLabelMenuOpen && filteredLabelOptions.length > 0 && (
+                                      <div
+                                        className="absolute left-0 top-full mt-1 w-44 max-h-40 overflow-auto rounded-lg border border-slate-700/70 bg-slate-950/95 backdrop-blur shadow-2xl z-50"
+                                        onMouseDown={(e) => e.preventDefault()}
+                                      >
+                                        {filteredLabelOptions.slice(0, 20).map((opt, idx) => (
+                                          <button
+                                            key={opt}
+                                            type="button"
+                                            onMouseDown={(e) => {
+                                              e.preventDefault();
+                                              commitLabelOption(opt);
+                                            }}
+                                            className={`w-full text-left px-3 py-2 text-[10px] uppercase font-bold tracking-wider transition-colors ${
+                                              idx === labelMenuIndex
+                                                ? 'bg-indigo-600/30 text-indigo-200'
+                                                : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
+                                            }`}
+                                          >
+                                            {opt}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
                                 </div>
                             ) : todo.customLabel && onUpdateLabel ? (
                                 <button 
-                                    onClick={(e) => { e.stopPropagation(); setIsEditingLabel(true); }}
+                                    onClick={(e) => { 
+                                      e.stopPropagation(); 
+                                      setIsEditingLabel(true); 
+                                      setIsLabelMenuOpen(true);
+                                      setLabelMenuIndex(0);
+                                      // Ensure input focuses after state change
+                                      setTimeout(() => labelInputRef.current?.focus(), 0);
+                                    }}
                                     className="flex items-center gap-1 text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 transition-colors"
                                     title="Click to edit label"
                                 >
@@ -543,7 +657,13 @@ const TodoItem: React.FC<TodoItemProps> = ({
                                 </span>
                             ) : onUpdateLabel && (
                                 <button 
-                                    onClick={(e) => { e.stopPropagation(); setIsEditingLabel(true); }}
+                                    onClick={(e) => { 
+                                      e.stopPropagation(); 
+                                      setIsEditingLabel(true); 
+                                      setIsLabelMenuOpen(true);
+                                      setLabelMenuIndex(0);
+                                      setTimeout(() => labelInputRef.current?.focus(), 0);
+                                    }}
                                     className="flex items-center gap-1 text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border border-dashed border-slate-600 bg-slate-800/30 text-slate-500 hover:border-indigo-500/50 hover:text-indigo-400 transition-colors"
                                     title="Add label"
                                 >
