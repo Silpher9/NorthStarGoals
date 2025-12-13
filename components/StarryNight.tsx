@@ -160,7 +160,16 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
   useEffect(() => {
     if (!mountRef.current) return;
     
+    // Set mounted flag FIRST before any setup
     isMountedRef.current = true;
+    
+    // Clear any stale refs from previous mount (StrictMode safety)
+    animationRef.current = {
+      frameId: null,
+      starData: [],
+      geometry: null,
+      galaxySystem: null
+    };
 
     // Mobile Optimization: Reduce particle count
     const isMobile = window.innerWidth < 768;
@@ -169,7 +178,8 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
 
     // Scene Setup
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x000000, 0.02); 
+    // Reduced fog density for better star visibility (was 0.02)
+    scene.fog = new THREE.FogExp2(0x000000, 0.008); 
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(
@@ -178,12 +188,27 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
       0.1,
       1000
     );
-    camera.position.set(0, 0, 0);
+    // Position camera slightly forward to see objects at negative z
+    camera.position.set(0, 0, 5);
+    camera.lookAt(0, 0, -50); // Look into the scene
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+    const containerWidth = mountRef.current.clientWidth;
+    const containerHeight = mountRef.current.clientHeight;
+    
+    renderer.setSize(containerWidth, containerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    
+    // Ensure canvas is properly styled for visibility
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.top = '0';
+    renderer.domElement.style.left = '0';
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.zIndex = '1'; // Ensure canvas is visible
+    renderer.domElement.style.pointerEvents = 'none';
+    
     mountRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -191,6 +216,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     const goalGroup = new THREE.Group();
     scene.add(goalGroup);
     goalGroupRef.current = goalGroup;
+    
 
     // --- Galaxy Background ---
     const galaxyGeometry = new THREE.BufferGeometry();
@@ -229,10 +255,10 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     galaxyGeometry.setAttribute('color', new THREE.BufferAttribute(galaxyColors, 3));
     
     const galaxyMaterial = new THREE.PointsMaterial({
-        size: 0.6,
+        size: 0.8,  // Increased from 0.6
         vertexColors: true,
         transparent: true,
-        opacity: 0.5,
+        opacity: 0.7,  // Increased from 0.5
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         sizeAttenuation: true
@@ -256,17 +282,19 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
       const x = getSpawnX();
       const y = getSpawnY();
       const z = getSpawnZ();
-      const speed = (Math.random() * 0.5 + 0.1) * 0.05; 
+      // Balanced speed for smooth warp effect (0.03-0.12)
+      const speed = Math.random() * 0.09 + 0.03; 
 
       starData.push({ x, y, z, speed });
 
-      const brightness = Math.random() * 0.4 + 0.1;
+      // Make stars brighter and more visible
+      const brightness = Math.random() * 0.5 + 0.5; // 0.5 to 1.0 (was 0.1 to 0.5)
       colors[i * 6 + 0] = brightness;
       colors[i * 6 + 1] = brightness;
-      colors[i * 6 + 2] = brightness + 0.2; 
-      colors[i * 6 + 3] = 0.05;
-      colors[i * 6 + 4] = 0.05;
-      colors[i * 6 + 5] = 0.1;
+      colors[i * 6 + 2] = Math.min(1.0, brightness + 0.3); // Slight blue tint
+      colors[i * 6 + 3] = 0.2; // Tail brighter too (was 0.05)
+      colors[i * 6 + 4] = 0.2;
+      colors[i * 6 + 5] = 0.3;
     }
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -279,7 +307,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     const material = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.9, // Increased from 0.6 for better visibility
     });
 
     const starSystem = new THREE.LineSegments(geometry, material);
@@ -295,7 +323,8 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
       animationRef.current.frameId = requestAnimationFrame(animate);
       const time = Date.now() * 0.001;
       
-      const currentStarData = animationRef.current.starData;
+      // Get refs with null safety
+      const currentStarData = animationRef.current.starData || [];
       const currentGeometry = animationRef.current.geometry;
       const currentGalaxySystem = animationRef.current.galaxySystem;
 
@@ -391,7 +420,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
                                 Math.sin(time * 30 + phase) * 0.02;
                 child.material.opacity = 0.95 + flicker; 
 
-                const baseScale = u.baseScale || 3;
+                const baseScale = u.baseScale || 5; // Increased default from 3 to 5
                 const scaleVar = Math.sin(time * 2 + phase) * (baseScale * 0.03); 
                 child.scale.set(baseScale + scaleVar, baseScale + scaleVar, 1);
                 
@@ -471,6 +500,9 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
         });
       }
 
+      // Clear and render
+      renderer.setClearColor(0x000000, 0); // Transparent background
+      renderer.clear();
       renderer.render(scene, camera);
     };
 
@@ -489,16 +521,21 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
 
     return () => {
       isMountedRef.current = false;
+      
       window.removeEventListener('resize', handleResize);
+      
+      // Cancel any pending animation frame
       if (animationRef.current.frameId) {
         cancelAnimationFrame(animationRef.current.frameId);
         animationRef.current.frameId = null;
       }
+      
       // Safely remove canvas
       if (mountRef.current && renderer.domElement && mountRef.current.contains(renderer.domElement)) {
         mountRef.current.removeChild(renderer.domElement);
       }
-      // Dispose resources
+      
+      // Dispose Three.js resources
       geometry.dispose();
       galaxyGeometry.dispose();
       material.dispose();
@@ -513,10 +550,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
       textureCacheRef.current.forEach((texture) => texture.dispose());
       textureCacheRef.current.clear();
       
-      // Clear all refs for clean re-mount
-      animationRef.current.starData = [];
-      animationRef.current.geometry = null;
-      animationRef.current.galaxySystem = null;
+      // Clear Three.js object refs
       sceneRef.current = null;
       cameraRef.current = null;
       rendererRef.current = null;
@@ -524,12 +558,15 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
       nodesRef.current = [];
       physicsFrameRef.current = 0;
       labelElementsRef.current.clear();
+      
+      // Note: animationRef is reset at start of next mount, not here
+      // This prevents race conditions with any lingering callbacks
     };
   }, []);
 
   // Sync Goal Meshes with Props & setup Physics Nodes
   useEffect(() => {
-    if (!goalGroupRef.current || !sceneRef.current || !isMountedRef.current) return;
+    if (!goalGroupRef.current || !sceneRef.current) return;
 
     // 1. Manage Children (Add/Remove)
     const currentMeshIds = new Set(goalGroupRef.current.children.map(c => c.userData.id));
@@ -630,10 +667,10 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
         normal: 6.5
     };
     const SCALE_MAP: Record<string, number> = {
-        gold: 3.5,
-        silver: 2.0,
-        bronze: 1.2,
-        normal: 0.6
+        gold: 5.0,    // Increased from 3.5
+        silver: 3.5,   // Increased from 2.0
+        bronze: 2.5,   // Increased from 1.2
+        normal: 1.5    // Increased from 0.6
     };
 
     if (goalGroupRef.current) {

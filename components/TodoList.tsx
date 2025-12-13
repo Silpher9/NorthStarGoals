@@ -745,7 +745,6 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
     localStorage.setItem('todos', JSON.stringify(todos));
     if (onGoalsChange) {
         // Emit active goals AND normal tasks for visualization
-        // Filter out archived tasks
         const visualGoals = todos.filter(t => t.status === 'active' && !t.completed);
         onGoalsChange(visualGoals);
     }
