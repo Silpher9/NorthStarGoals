@@ -29,12 +29,14 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
   const animationRef = useRef<{
     frameId: number | null;
     lastTimeMs: number;
-    starData: { x: number; y: number; z: number; speedFactor: number }[];
+    smoothedDt60: number;
+    starData: { x: number; y: number; z: number; spawnZ: number; speedFactor: number }[];
     geometry: THREE.BufferGeometry | null;
     galaxySystem: THREE.Points | null;
   }>({
     frameId: null,
     lastTimeMs: 0,
+    smoothedDt60: 1,
     starData: [],
     geometry: null,
     galaxySystem: null
@@ -174,6 +176,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     animationRef.current = {
       frameId: null,
       lastTimeMs: 0,
+      smoothedDt60: 1,
       starData: [],
       geometry: null,
       galaxySystem: null
@@ -185,7 +188,7 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
 
     // "Stars coming towards you" (warp lines) — tuned to be calmer:
     // fewer particles and dimmer overall.
-    const starCount = isMobile ? 250 : 800;
+    const starCount = isMobile ? 188 : 600; // 25% fewer warp stars
 
     // Scene Setup
     const scene = new THREE.Scene();
@@ -283,24 +286,42 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(starCount * 2 * 3);
     const colors = new Float32Array(starCount * 2 * 3);
-    const starData: { x: number; y: number; z: number; speedFactor: number }[] = [];
+    const starData: { x: number; y: number; z: number; spawnZ: number; speedFactor: number }[] = [];
 
     // Spawn volume / speed tuning for "stars coming towards you"
-    const STAR_Z_FAR = -100;
-    const STAR_Z_NEAR = 0;
-    const getSpawnZ = () => -Math.random() * 80 - 20; // -20 .. -100
+    // Camera is at z=5 looking toward -z; spawn fairly close, but recycle only once fully behind camera.
+    const STAR_Z_FAR = -260;
+    const STAR_Z_SPAWN_NEAR = -80;
+    const STAR_Z_RESET = camera.position.z + 3; // behind camera -> recycle invisibly
+    const getSpawnZ = () => THREE.MathUtils.lerp(STAR_Z_FAR, STAR_Z_SPAWN_NEAR, Math.random());
 
-    // Ensure stars don't spawn too close to dead-center; otherwise some appear stationary.
+    // Spawn stars across the *visible screen area* (camera frustum) so it fills any viewport size.
+    // Use the near-spawn depth (smallest visible bounds) so stars remain in-view as they move toward the camera.
+    const getVisibleHalfExtentsAtZ = (z: number) => {
+      const distance = Math.max(0.001, camera.position.z - z);
+      const halfH = Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)) * distance;
+      const halfW = halfH * camera.aspect;
+      return { halfW, halfH };
+    };
+
     const getSpawnXY = () => {
-      let x = 0;
-      let y = 0;
-      // Manhattan distance threshold keeps distribution fast while avoiding the near-center "stuck" look.
-      // (Perspective projection makes near-center stars move very little on-screen.)
-      do {
-        x = (Math.random() - 0.5) * 100;
-        y = (Math.random() - 0.5) * 60;
-      } while (Math.abs(x) + Math.abs(y) < 6);
-      return { x, y };
+      const { halfW, halfH } = getVisibleHalfExtentsAtZ(STAR_Z_SPAWN_NEAR);
+      const overscan = 1.05; // a touch beyond edges for nicer coverage
+
+      // Avoid spawning too close to dead-center; otherwise some stars look "stuck"/stationary.
+      // Scale the dead zone with viewport size so it behaves consistently on all screens.
+      const minR = Math.max(1.5, Math.min(halfW, halfH) * 0.3);
+      const minRSq = minR * minR;
+
+      for (let tries = 0; tries < 20; tries++) {
+        const x = (Math.random() * 2 - 1) * halfW * overscan;
+        const y = (Math.random() * 2 - 1) * halfH * overscan;
+        if (x * x + y * y >= minRSq) return { x, y };
+      }
+
+      // Fallback: pick a point on the ring at minR.
+      const a = Math.random() * Math.PI * 2;
+      return { x: Math.cos(a) * minR, y: Math.sin(a) * minR };
     };
 
     for (let i = 0; i < starCount; i++) {
@@ -309,10 +330,24 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
       // Per-star variation that we apply on top of a depth-based speed curve.
       const speedFactor = Math.random() * 0.8 + 0.6; // 0.6 .. 1.4
 
-      starData.push({ x, y, z, speedFactor });
+      starData.push({ x, y, z, spawnZ: z, speedFactor });
 
-      // Dimmer stars (calmer warp effect)
-      const brightness = Math.random() * 0.3 + 0.15; // 0.15 to 0.45
+      // Initialize geometry positions immediately (avoids first-frame "pop" and helps stable bounds).
+      // Start slow at spawn; speed ramps up as it approaches the camera.
+      const baseSpeedInit = 0.35; // units per ~60fps frame
+      const speedInit = baseSpeedInit * speedFactor; // assumes ~60fps baseline during init
+      const streakInit = Math.min(110, speedInit * 45);
+      const headIndex = i * 2;
+      const tailIndex = i * 2 + 1;
+      positions[headIndex * 3 + 0] = x;
+      positions[headIndex * 3 + 1] = y;
+      positions[headIndex * 3 + 2] = z;
+      positions[tailIndex * 3 + 0] = x;
+      positions[tailIndex * 3 + 1] = y;
+      positions[tailIndex * 3 + 2] = z - streakInit;
+
+      // Dimmer stars (calmer warp effect) - adjusted brightness
+      const brightness = Math.random() * 0.195 + 0.0975; // 0.0975 to 0.2925 (30% brighter)
       colors[i * 6 + 0] = brightness;
       colors[i * 6 + 1] = brightness;
       colors[i * 6 + 2] = Math.min(1.0, brightness + 0.15); // Slight blue tint
@@ -322,8 +357,11 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
       colors[i * 6 + 5] = 0.06;
     }
 
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const positionAttribute = new THREE.BufferAttribute(positions, 3);
+    positionAttribute.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute('position', positionAttribute);
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.computeBoundingSphere();
     
     // Store starData in ref for animation loop
     animationRef.current.starData = starData;
@@ -332,10 +370,15 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
     const material = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.36, // 30% brighter than 0.275
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
     });
 
     const starSystem = new THREE.LineSegments(geometry, material);
+    // Geometry bounds don't update per-frame; avoid frustum culling flicker/disappear.
+    starSystem.frustumCulled = false;
     scene.add(starSystem);
 
     // --- Animation Loop ---
@@ -350,6 +393,11 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
       const prevMs = animationRef.current.lastTimeMs || nowMs;
       animationRef.current.lastTimeMs = nowMs;
       const dt = Math.min(0.05, (nowMs - prevMs) / 1000); // clamp to avoid huge jumps
+      const rawDt60 = dt * 60;
+      // Smooth frame pacing differences (notably Firefox) to avoid visible streak-length jitter.
+      const prevSmooth = animationRef.current.smoothedDt60 || rawDt60;
+      const smoothedDt60 = THREE.MathUtils.lerp(prevSmooth, rawDt60, 0.12);
+      animationRef.current.smoothedDt60 = smoothedDt60;
       const time = nowMs * 0.001;
       
       // Get refs with null safety
@@ -368,21 +416,32 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
         for (let i = 0; i < currentStarData.length; i++) {
           const star = currentStarData[i];
 
-          // Depth-based speed: far stars drift slowly, near stars streak fast.
-          // Normalize z into 0..1 where 0 is far and 1 is near camera.
-          const depthT = THREE.MathUtils.clamp((star.z - STAR_Z_FAR) / (STAR_Z_NEAR - STAR_Z_FAR), 0, 1);
-          const eased = depthT * depthT; // ease-in: slow far away, faster as it approaches
-          const baseSpeed = THREE.MathUtils.lerp(0.015, 0.28, eased); // units per ~60fps frame (after dt scaling)
-          const speed = baseSpeed * star.speedFactor * (dt * 60);
+          // Speed curve is based on how far the star has traveled since *its own* spawn,
+          // so it always starts slow and ramps up smoothly (even when spawning closer).
+          const denom = (STAR_Z_RESET - star.spawnZ) || 1;
+          const travelT = THREE.MathUtils.clamp((star.z - star.spawnZ) / denom, 0, 1);
+          const eased = travelT * travelT; // ease-in acceleration
+          // Much slower "end speed" for a calmer warp effect - reduced by 50%.
+          const baseSpeed = THREE.MathUtils.lerp(0.175, 0.675, eased); // units per ~60fps frame (after dt scaling)
+          const speed = baseSpeed * star.speedFactor * smoothedDt60;
 
           star.z += speed;
-          if (star.z > STAR_Z_NEAR) {
+          
+          // Add radial outward movement so edge stars don't appear stuck
+          // Stars spread outward from center as they approach camera
+          const radialSpeed = speed * 0.015; // Scale radial movement with z-speed
+          const distFromCenter = Math.sqrt(star.x * star.x + star.y * star.y) || 0.001;
+          star.x += (star.x / distFromCenter) * radialSpeed * distFromCenter * 0.1;
+          star.y += (star.y / distFromCenter) * radialSpeed * distFromCenter * 0.1;
+          
+          if (star.z > STAR_Z_RESET) {
             star.z = getSpawnZ();
+            star.spawnZ = star.z;
             const { x, y } = getSpawnXY();
             star.x = x;
             star.y = y;
           }
-          const streakLength = speed * 45;
+          const streakLength = Math.min(110, speed * 45);
           const headIndex = i * 2;
           const tailIndex = i * 2 + 1;
           positionsAttribute.setXYZ(headIndex, star.x, star.y, star.z);
