@@ -34,8 +34,8 @@ const StatsView: React.FC<StatsViewProps> = ({ todos }) => {
         totalScore += points;
         completedCount++;
       } else if (t.status === 'graveyard') {
-        // Failed tasks deduct points with 1.5x Multiplier
-        totalScore -= (points * 1.5);
+        // Failed tasks deduct points with 0.5x Multiplier (reduced penalty for Volume Over Status model)
+        totalScore -= (points * 0.5);
         failedCount++;
       }
     });
@@ -121,8 +121,8 @@ const StatsView: React.FC<StatsViewProps> = ({ todos }) => {
 
       const points = calculateTodoPoints(t, todos);
 
-      // Failed Penalty 1.5x
-      const val = t.completed ? points : (t.status === 'graveyard' ? -(points * 1.5) : 0);
+      // Failed Penalty 0.5x (reduced for Volume Over Status model)
+      const val = t.completed ? points : (t.status === 'graveyard' ? -(points * 0.5) : 0);
 
       rawData[tier][idx] += val;
     });
@@ -252,8 +252,8 @@ const StatsView: React.FC<StatsViewProps> = ({ todos }) => {
 
         const points = calculateTodoPoints(t, todos);
         
-        // Failed Penalty 1.5x
-        const val = t.completed ? points : (t.status === 'graveyard' ? -(points * 1.5) : 0);
+        // Failed Penalty 0.5x (reduced for Volume Over Status model)
+        const val = t.completed ? points : (t.status === 'graveyard' ? -(points * 0.5) : 0);
 
         if (isMonth) {
             monthStats[tier] += val;
