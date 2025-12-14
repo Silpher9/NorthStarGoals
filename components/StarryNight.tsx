@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { RefreshCw, Check, AlertCircle, Cloud, CloudOff } from 'lucide-react';
 import { Todo } from '../types';
 
+declare const __APP_VERSION__: string;
+
 interface SyncState {
   status: 'disconnected' | 'connecting' | 'connected' | 'error';
   lastSyncedAt: number | null;
@@ -896,6 +898,9 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [], syncState, onForc
             <h1 className="text-lg font-thin tracking-[0.2em] text-white opacity-90 drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]">
                 NORTH STAR
             </h1>
+            <p className="text-[10px] text-slate-500/70 font-mono tracking-wider mt-1">
+                v{__APP_VERSION__}
+            </p>
             <p className="text-[10px] text-slate-400 tracking-widest mt-1 uppercase">Constellation of Goals</p>
         </div>
 
