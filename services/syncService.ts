@@ -272,10 +272,43 @@ export const getLastSyncedAt = (): number | null => {
   return getSyncState().lastSyncedAt;
 };
 
-// Force sync - push current data and return success/failure
+// Helper function to merge arrays by ID, preferring newer items
+const mergeByIdAndTimestamp = <T extends { id: string; createdAt?: number; resolvedAt?: number }>(
+  localItems: T[],
+  remoteItems: T[]
+): T[] => {
+  const merged = new Map<string, T>();
+  
+  // Add all remote items first
+  remoteItems.forEach(item => merged.set(item.id, item));
+  
+  // Add or update with local items, preferring newer timestamps
+  localItems.forEach(localItem => {
+    const remoteItem = merged.get(localItem.id);
+    
+    if (!remoteItem) {
+      // Item only exists locally, add it
+      merged.set(localItem.id, localItem);
+    } else {
+      // Item exists in both, compare timestamps to determine which is newer
+      const localTime = localItem.resolvedAt || localItem.createdAt || 0;
+      const remoteTime = remoteItem.resolvedAt || remoteItem.createdAt || 0;
+      
+      // Keep the one with the newer timestamp
+      if (localTime > remoteTime) {
+        merged.set(localItem.id, localItem);
+      }
+      // If remote is newer or equal, it's already in the map
+    }
+  });
+  
+  return Array.from(merged.values());
+};
+
+// Force sync - smart sync that pulls, compares, and merges before deciding direction
 export const forceSync = async (
-  data: { todos: Todo[]; routines: Routine[]; notes: Note[] }
-): Promise<{ success: boolean; error?: string }> => {
+  localData: { todos: Todo[]; routines: Routine[]; notes: Note[] }
+): Promise<{ success: boolean; error?: string; remoteData?: SyncData }> => {
   const state = getSyncState();
   
   if (!state.enabled || !state.syncCode) {
@@ -285,23 +318,98 @@ export const forceSync = async (
   try {
     const docRef = doc(db, 'syncRooms', state.syncCode);
     
-    // Use setDoc with merge to create document if it doesn't exist
-    // This handles cases where the document was deleted or never created
-    await setDoc(docRef, {
-      todos: data.todos,
-      routines: data.routines,
-      notes: data.notes,
-      lastUpdated: serverTimestamp(),
-      deviceId: state.deviceId
-    }, { merge: true });
+    // Step 1: Pull remote data first
+    const docSnap = await getDoc(docRef);
     
-    // Update last synced time
-    saveSyncState({
-      ...state,
-      lastSyncedAt: Date.now()
-    });
+    if (!docSnap.exists()) {
+      // Room doesn't exist, create it with local data
+      await setDoc(docRef, {
+        todos: localData.todos,
+        routines: localData.routines,
+        notes: localData.notes,
+        lastUpdated: serverTimestamp(),
+        deviceId: state.deviceId
+      });
+      
+      saveSyncState({
+        ...state,
+        lastSyncedAt: Date.now()
+      });
+      
+      return { success: true };
+    }
     
-    return { success: true };
+    const remoteData = docSnap.data() as SyncData;
+    const remoteUpdatedAt = remoteData.lastUpdated?.toMillis?.() ?? 0;
+    const localUpdatedAt = state.lastSyncedAt ?? 0;
+    
+    // Step 2: Compare timestamps and decide strategy
+    const timeDiff = Math.abs(remoteUpdatedAt - localUpdatedAt);
+    const CONFLICT_THRESHOLD = 5000; // 5 seconds
+    
+    if (timeDiff < CONFLICT_THRESHOLD) {
+      // Step 3a: Timestamps are close - merge intelligently
+      console.log('Force sync: Merging data from both sources');
+      
+      const mergedTodos = mergeByIdAndTimestamp(localData.todos, remoteData.todos || []);
+      const mergedRoutines = mergeByIdAndTimestamp(localData.routines, remoteData.routines || []);
+      const mergedNotes = mergeByIdAndTimestamp(localData.notes, remoteData.notes || []);
+      
+      // Push merged data back to Firebase
+      await setDoc(docRef, {
+        todos: mergedTodos,
+        routines: mergedRoutines,
+        notes: mergedNotes,
+        lastUpdated: serverTimestamp(),
+        deviceId: state.deviceId
+      });
+      
+      saveSyncState({
+        ...state,
+        lastSyncedAt: Date.now()
+      });
+      
+      // Return merged data to be applied locally
+      return {
+        success: true,
+        remoteData: {
+          todos: mergedTodos,
+          routines: mergedRoutines,
+          notes: mergedNotes,
+          lastUpdated: remoteData.lastUpdated,
+          deviceId: state.deviceId
+        }
+      };
+    } else if (remoteUpdatedAt > localUpdatedAt) {
+      // Step 3b: Remote is newer - pull remote data
+      console.log('Force sync: Remote data is newer, pulling from server');
+      
+      saveSyncState({
+        ...state,
+        lastSyncedAt: Date.now()
+      });
+      
+      // Return remote data to be applied locally
+      return { success: true, remoteData };
+    } else {
+      // Step 3c: Local is newer - push local data
+      console.log('Force sync: Local data is newer, pushing to server');
+      
+      await setDoc(docRef, {
+        todos: localData.todos,
+        routines: localData.routines,
+        notes: localData.notes,
+        lastUpdated: serverTimestamp(),
+        deviceId: state.deviceId
+      });
+      
+      saveSyncState({
+        ...state,
+        lastSyncedAt: Date.now()
+      });
+      
+      return { success: true };
+    }
   } catch (e) {
     console.error('Force sync failed:', e);
     return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };

@@ -1241,8 +1241,15 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
     if (!isSyncEnabled()) {
       return { success: false, error: 'Sync not enabled' };
     }
+    
     const result = await forceSync({ todos, routines, notes });
-    return result;
+    
+    // If force sync returned remote data, apply it locally
+    if (result.success && result.remoteData) {
+      applyRemoteData(result.remoteData);
+    }
+    
+    return { success: result.success, error: result.error };
   }, [todos, routines, notes]);
 
   // Notify parent of sync state changes
