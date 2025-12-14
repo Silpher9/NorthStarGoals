@@ -1,0 +1,48 @@
+# NorthStarGoals Cursor Rules
+
+## Commit message format
+
+Commit subjects must start with an emoji + type:
+
+- 🐛 :fix: ...
+- ✨ :feat: ...
+- 📝 :docs: ...
+- 🎨 :style: ...
+- ♻️ :refactor: ...
+- 🚀 :perf: ...
+- ✅ :test: ...
+
+## Versioning (SemVer)
+
+The app version is stored in `package.json` as `version` (MAJOR.MINOR.PATCH) and is displayed in the UI.
+
+### When making a commit
+
+If you are asked to create a new git commit, you MUST:
+
+1. Determine the commit type from the commit message (`:fix:`, `:feat:`, breaking `!`, or a `BREAKING CHANGE` note).
+2. Bump `package.json` version accordingly (and include it in the same commit).
+
+### Bump rules
+
+- `🐛 :fix:` => PATCH bump (e.g. 1.1.0 -> 1.1.1)
+- `✨ :feat:` => MINOR bump (e.g. 1.1.0 -> 1.2.0)
+- Any breaking change (`!` in the type or `BREAKING CHANGE`) => MAJOR bump (e.g. 1.1.0 -> 2.0.0)
+
+### No bump required
+
+- `📝 :docs:`
+- `🎨 :style:`
+- `♻️ :refactor:`
+- `🚀 :perf:` (unless it changes behavior)
+- `✅ :test:`
+
+### Preferred workflow
+
+Use npm to update the version number (no tag):
+
+- patch: `npm version patch --no-git-tag-version`
+- minor: `npm version minor --no-git-tag-version`
+- major: `npm version major --no-git-tag-version`
+
+Then commit both code changes and `package.json` version bump together.

@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef } from 'react';
 import StarryNight from './components/StarryNight';
 import TodoList from './components/TodoList';
+import VersionBadge from './components/VersionBadge';
 import { Todo } from './types';
 
 interface SyncState {
@@ -47,6 +48,9 @@ const App: React.FC = () => {
           onForceSyncReady={handleForceSyncReady}
         />
       </div>
+      
+      {/* Version Badge */}
+      <VersionBadge />
     </div>
   );
 };
