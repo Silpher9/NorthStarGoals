@@ -108,14 +108,14 @@ export const createSyncRoom = async (
     const deviceId = getDeviceId();
     const docRef = doc(db, 'syncRooms', code.toUpperCase());
     
-    await setDoc(docRef, {
+    await setDoc(docRef, sanitizeForFirebase({
       todos: data.todos,
       routines: data.routines,
       notes: data.notes,
       lastUpdated: serverTimestamp(),
       deviceId: deviceId,
       createdAt: serverTimestamp()
-    });
+    }));
     
     // Save sync state
     saveSyncState({
@@ -176,13 +176,13 @@ export const pushChanges = async (
     
     // Use setDoc with merge to create document if it doesn't exist
     // This handles cases where the document was deleted or never created
-    await setDoc(docRef, {
+    await setDoc(docRef, sanitizeForFirebase({
       todos: data.todos,
       routines: data.routines,
       notes: data.notes,
       lastUpdated: serverTimestamp(),
       deviceId: state.deviceId
-    }, { merge: true });
+    }), { merge: true });
     
     // Update last synced time
     saveSyncState({
@@ -272,6 +272,30 @@ export const getLastSyncedAt = (): number | null => {
   return getSyncState().lastSyncedAt;
 };
 
+// Sanitize data for Firebase by removing undefined values
+// Firebase doesn't allow undefined values, only null or omitted fields
+const sanitizeForFirebase = <T>(data: T): T => {
+  if (data === null || data === undefined) {
+    return null as T;
+  }
+  
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeForFirebase(item)) as T;
+  }
+  
+  if (typeof data === 'object') {
+    const sanitized: any = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        sanitized[key] = sanitizeForFirebase(value);
+      }
+    }
+    return sanitized as T;
+  }
+  
+  return data;
+};
+
 // Helper function to merge arrays by ID, preferring newer items
 const mergeByIdAndTimestamp = <T extends { id: string; createdAt?: number; resolvedAt?: number }>(
   localItems: T[],
@@ -323,13 +347,13 @@ export const forceSync = async (
     
     if (!docSnap.exists()) {
       // Room doesn't exist, create it with local data
-      await setDoc(docRef, {
+      await setDoc(docRef, sanitizeForFirebase({
         todos: localData.todos,
         routines: localData.routines,
         notes: localData.notes,
         lastUpdated: serverTimestamp(),
         deviceId: state.deviceId
-      });
+      }));
       
       saveSyncState({
         ...state,
@@ -356,13 +380,13 @@ export const forceSync = async (
       const mergedNotes = mergeByIdAndTimestamp(localData.notes, remoteData.notes || []);
       
       // Push merged data back to Firebase
-      await setDoc(docRef, {
+      await setDoc(docRef, sanitizeForFirebase({
         todos: mergedTodos,
         routines: mergedRoutines,
         notes: mergedNotes,
         lastUpdated: serverTimestamp(),
         deviceId: state.deviceId
-      });
+      }));
       
       saveSyncState({
         ...state,
@@ -395,13 +419,13 @@ export const forceSync = async (
       // Step 3c: Local is newer - push local data
       console.log('Force sync: Local data is newer, pushing to server');
       
-      await setDoc(docRef, {
+      await setDoc(docRef, sanitizeForFirebase({
         todos: localData.todos,
         routines: localData.routines,
         notes: localData.notes,
         lastUpdated: serverTimestamp(),
         deviceId: state.deviceId
-      });
+      }));
       
       saveSyncState({
         ...state,
