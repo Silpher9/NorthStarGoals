@@ -66,6 +66,7 @@ const TodoItem: React.FC<TodoItemProps> = ({
 
   // Confirmation Modal State
   const [showCompleteConfirmation, setShowCompleteConfirmation] = useState(false);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
 
   // Inline Editing State for Title and Label
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -515,6 +516,37 @@ const TodoItem: React.FC<TodoItemProps> = ({
             </div>
         )}
 
+        {showDeleteConfirmation && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/95 md:bg-black/70 md:backdrop-blur-sm animate-in fade-in duration-200" onClick={(e) => { e.stopPropagation(); setShowDeleteConfirmation(false); }}>
+                <div className="bg-slate-900 border border-red-500/30 rounded-xl p-6 shadow-2xl max-w-sm w-full relative" onClick={e => e.stopPropagation()}>
+                    <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+                        <Trash2 size={20} className="text-red-400" />
+                        Confirm Delete
+                    </h3>
+                    <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+                        Are you sure you want to delete <span className="text-white font-bold">"{todo.text}"</span> and all its subtasks?
+                    </p>
+                    <div className="flex justify-end gap-3">
+                        <button 
+                            onClick={() => setShowDeleteConfirmation(false)}
+                            className="px-4 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors text-xs font-bold uppercase tracking-wider min-h-[44px]"
+                        >
+                            Cancel
+                        </button>
+                        <button 
+                            onClick={() => {
+                                onDelete(todo.id);
+                                setShowDeleteConfirmation(false);
+                            }}
+                            className="px-4 py-3 rounded-lg bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/20 text-xs font-bold uppercase tracking-wider min-h-[44px]"
+                        >
+                            Delete Task
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         <div 
         className={`
             group flex items-center gap-3 p-4 rounded-xl border relative
@@ -916,27 +948,67 @@ const TodoItem: React.FC<TodoItemProps> = ({
                                 >
                                     <Edit3 size={14} />
                                 </button>
+
+                                {/* Delete Task Button */}
+                                <button 
+                                    onClick={(e) => { 
+                                        e.stopPropagation(); 
+                                        setShowDeleteConfirmation(true);
+                                    }}
+                                    className="p-3 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/30 transition-colors"
+                                    title="Delete Task"
+                                >
+                                    <Trash2 size={14} />
+                                </button>
                             </div>
                         ) : (
                             // DURATION NOT SET -> SHOW SET TIMER BUTTON
-                            <button
-                                onClick={(e) => { e.stopPropagation(); handleSetTimerClick(); }}
-                                disabled={!canActivate}
-                                className={`
-                                    p-3 rounded-lg transition-all shadow-[0_0_10px_rgba(234,179,8,0.1)] flex items-center gap-2 group/activate
-                                    ${canActivate 
-                                        ? 'text-yellow-500 hover:text-white hover:bg-yellow-600/20 bg-yellow-500/10 border border-yellow-500/30 hover:shadow-[0_0_15px_rgba(234,179,8,0.3)]' 
-                                        : 'text-slate-600 bg-slate-800/50 border border-slate-700 opacity-50 cursor-not-allowed'
-                                    }
-                                `}
-                                title={canActivate ? "Set Timer" : "Finish nested tasks first"}
-                            >
-                                <span className="text-xs font-bold uppercase tracking-wider opacity-80 group-hover/activate:opacity-100 hidden sm:inline whitespace-nowrap">Set Timer</span>
-                                {canActivate ? <Zap size={16} className="fill-current" /> : <Lock size={14} />}
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleSetTimerClick(); }}
+                                    disabled={!canActivate}
+                                    className={`
+                                        p-3 rounded-lg transition-all shadow-[0_0_10px_rgba(234,179,8,0.1)] flex items-center gap-2 group/activate
+                                        ${canActivate 
+                                            ? 'text-yellow-500 hover:text-white hover:bg-yellow-600/20 bg-yellow-500/10 border border-yellow-500/30 hover:shadow-[0_0_15px_rgba(234,179,8,0.3)]' 
+                                            : 'text-slate-600 bg-slate-800/50 border border-slate-700 opacity-50 cursor-not-allowed'
+                                        }
+                                    `}
+                                    title={canActivate ? "Set Timer" : "Finish nested tasks first"}
+                                >
+                                    <span className="text-xs font-bold uppercase tracking-wider opacity-80 group-hover/activate:opacity-100 hidden sm:inline whitespace-nowrap">Set Timer</span>
+                                    {canActivate ? <Zap size={16} className="fill-current" /> : <Lock size={14} />}
+                                </button>
+
+                                {/* Delete Task Button */}
+                                <button 
+                                    onClick={(e) => { 
+                                        e.stopPropagation(); 
+                                        setShowDeleteConfirmation(true);
+                                    }}
+                                    className="p-3 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/30 transition-colors"
+                                    title="Delete Task"
+                                >
+                                    <Trash2 size={14} />
+                                </button>
+                            </div>
                         )
                     )
                 )
+            )}
+
+            {/* Delete button for parent tasks (with subtasks) in Orbit view */}
+            {!isActivated && viewContext === 'orbit' && hasSubTasks && !isGraveyard && !isArchived && !todo.completed && (
+                <button 
+                    onClick={(e) => { 
+                        e.stopPropagation(); 
+                        setShowDeleteConfirmation(true);
+                    }}
+                    className="p-3 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/30 transition-colors"
+                    title="Delete Task"
+                >
+                    <Trash2 size={14} />
+                </button>
             )}
             
             {showBuybackButton && showDetails && (
