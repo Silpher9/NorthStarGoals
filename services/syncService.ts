@@ -174,13 +174,15 @@ export const pushChanges = async (
   try {
     const docRef = doc(db, 'syncRooms', state.syncCode);
     
-    await updateDoc(docRef, {
+    // Use setDoc with merge to create document if it doesn't exist
+    // This handles cases where the document was deleted or never created
+    await setDoc(docRef, {
       todos: data.todos,
       routines: data.routines,
       notes: data.notes,
       lastUpdated: serverTimestamp(),
       deviceId: state.deviceId
-    });
+    }, { merge: true });
     
     // Update last synced time
     saveSyncState({
@@ -277,13 +279,15 @@ export const forceSync = async (
   try {
     const docRef = doc(db, 'syncRooms', state.syncCode);
     
-    await updateDoc(docRef, {
+    // Use setDoc with merge to create document if it doesn't exist
+    // This handles cases where the document was deleted or never created
+    await setDoc(docRef, {
       todos: data.todos,
       routines: data.routines,
       notes: data.notes,
       lastUpdated: serverTimestamp(),
       deviceId: state.deviceId
-    });
+    }, { merge: true });
     
     // Update last synced time
     saveSyncState({
