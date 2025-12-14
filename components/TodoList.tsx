@@ -11,6 +11,7 @@ import {
     subscribeToChanges, 
     disconnectSync,
     isSyncEnabled,
+    getSyncState,
     SyncData,
     forceSync,
     getLastSyncedAt
@@ -793,6 +794,8 @@ interface TodoListProps {
 }
 
 const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, onForceSyncReady }) => {
+  const LOCAL_UPDATED_AT_KEY = 'northstar_local_last_updated_at';
+
   const [todos, setTodos] = useState<Todo[]>(() => {
     try {
       const saved = localStorage.getItem('todos');
@@ -829,6 +832,51 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
   );
   const syncUnsubscribeRef = useRef<(() => void) | null>(null);
   const isRemoteUpdateRef = useRef(false); // Flag to prevent push loops
+  const isSyncInitializingRef = useRef(false); // Prevent pushing while bootstrapping sync
+  // Safety latch: never push until we've successfully read the room once (or created it).
+  // This prevents a fresh/empty device from wiping the room with empty localStorage.
+  const hasRemoteBaselineRef = useRef(false);
+
+  // Keep refs for non-todo collections too (used during initial sync decision)
+  const routinesRef = useRef(routines);
+  useEffect(() => { routinesRef.current = routines; }, [routines]);
+  const notesRef = useRef(notes);
+  useEffect(() => { notesRef.current = notes; }, [notes]);
+
+  const getLocalUpdatedAt = () => {
+    try {
+      const raw = localStorage.getItem(LOCAL_UPDATED_AT_KEY);
+      const n = raw ? Number(raw) : null;
+      return Number.isFinite(n) ? n : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const setLocalUpdatedAt = (ts: number) => {
+    try {
+      localStorage.setItem(LOCAL_UPDATED_AT_KEY, String(ts));
+    } catch {
+      // ignore
+    }
+  };
+
+  const applyRemoteData = (data: SyncData) => {
+    isRemoteUpdateRef.current = true;
+
+    if (data.todos) setTodos(data.todos);
+    if (data.routines) setRoutines(data.routines);
+    if (data.notes) setNotes(data.notes);
+
+    // Keep a local notion of "freshness" so we can choose direction on next startup.
+    const remoteUpdatedAt = data.lastUpdated?.toMillis?.() ?? Date.now();
+    setLocalUpdatedAt(remoteUpdatedAt);
+
+    // Allow state to settle before we re-enable pushes
+    setTimeout(() => {
+      isRemoteUpdateRef.current = false;
+    }, 150);
+  };
 
   // Used label suggestions (for Orbit label dropdowns)
   const labelOptions = useMemo(() => {
@@ -855,6 +903,10 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
 
   useEffect(() => {
     localStorage.setItem('todos', JSON.stringify(todos));
+    // Track local change time (but don't treat remote hydrations as "local edits")
+    if (!isRemoteUpdateRef.current) {
+      setLocalUpdatedAt(Date.now());
+    }
     if (onGoalsChange) {
         // Emit active goals AND normal tasks for visualization
         const visualGoals = todos.filter(t => t.status === 'active' && !t.completed);
@@ -864,10 +916,16 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
 
   useEffect(() => {
     localStorage.setItem('routines', JSON.stringify(routines));
+    if (!isRemoteUpdateRef.current) {
+      setLocalUpdatedAt(Date.now());
+    }
   }, [routines]);
 
   useEffect(() => {
     localStorage.setItem('notes', JSON.stringify(notes));
+    if (!isRemoteUpdateRef.current) {
+      setLocalUpdatedAt(Date.now());
+    }
   }, [notes]);
 
   // Use a ref for todos so callbacks can access latest state without dependency
@@ -1031,38 +1089,90 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
   
   // Set up real-time listener on mount if already connected
   useEffect(() => {
-    if (isSyncEnabled()) {
+    let cancelled = false;
+
+    const setupSync = async () => {
+      if (!isSyncEnabled()) return;
+
+      isSyncInitializingRef.current = true;
       setSyncStatus('connecting');
-      const unsubscribe = subscribeToChanges(
-        (data: SyncData) => {
-          // Mark that this is a remote update to prevent push loop
-          isRemoteUpdateRef.current = true;
-          
-          // Update local state with remote data
-          if (data.todos) setTodos(data.todos);
-          if (data.routines) setRoutines(data.routines);
-          if (data.notes) setNotes(data.notes);
-          
-          // Reset flag after a short delay (allows state to settle)
-          setTimeout(() => {
-            isRemoteUpdateRef.current = false;
-          }, 100);
-        },
-        (error) => {
-          console.error('Sync error:', error);
+
+      try {
+        // Pull remote first to avoid wiping the room with empty localStorage on a fresh device.
+        const state = getSyncState();
+        const code = state.syncCode;
+
+        if (code) {
+          const remote = await joinSyncRoom(code);
+          if (cancelled) return;
+
+          if (remote) {
+            // We successfully read the room at least once.
+            hasRemoteBaselineRef.current = true;
+
+            const localTodos = todosRef.current || [];
+            const localRoutines = routinesRef.current || [];
+            const localNotes = notesRef.current || [];
+
+            const localCount = localTodos.length + localRoutines.length + localNotes.length;
+            const remoteCount = (remote.todos?.length || 0) + (remote.routines?.length || 0) + (remote.notes?.length || 0);
+
+            const localUpdatedAt = getLocalUpdatedAt();
+            const remoteUpdatedAt = remote.lastUpdated?.toMillis?.() ?? null;
+
+            const remoteLooksNewer =
+              remoteUpdatedAt !== null &&
+              (localUpdatedAt === null || remoteUpdatedAt > localUpdatedAt + 1000);
+
+            const localLooksNewer =
+              localUpdatedAt !== null &&
+              (remoteUpdatedAt === null || localUpdatedAt > remoteUpdatedAt + 1000);
+
+            if (remoteLooksNewer || (remoteCount > 0 && localCount === 0)) {
+              applyRemoteData(remote);
+            } else if (localLooksNewer || (localCount > 0 && remoteCount === 0)) {
+              // Remote is empty/stale but we have local data -> push local up.
+              await pushChanges({ todos: localTodos, routines: localRoutines, notes: localNotes });
+            } else if (remoteCount > 0) {
+              // Tie-breaker: prefer remote when both have data.
+              applyRemoteData(remote);
+            }
+          }
+        }
+
+        // Subscribe for realtime updates after initial direction decision
+        const unsubscribe = subscribeToChanges(
+          (data: SyncData) => {
+            if (cancelled) return;
+            // Subscription snapshot confirms we can read the room.
+            hasRemoteBaselineRef.current = true;
+            applyRemoteData(data);
+          },
+          (error) => {
+            console.error('Sync error:', error);
+            setSyncStatus('error');
+          }
+        );
+
+        if (unsubscribe) {
+          syncUnsubscribeRef.current = unsubscribe;
+          setSyncStatus('connected');
+        } else {
           setSyncStatus('error');
         }
-      );
-      
-      if (unsubscribe) {
-        syncUnsubscribeRef.current = unsubscribe;
-        setSyncStatus('connected');
-      } else {
+      } catch (e) {
+        console.error('Sync setup failed:', e);
         setSyncStatus('error');
+      } finally {
+        // Allow pushes after initial bootstrap (remote pull/push decision done)
+        isSyncInitializingRef.current = false;
       }
-    }
+    };
+
+    setupSync();
     
     return () => {
+      cancelled = true;
       if (syncUnsubscribeRef.current) {
         syncUnsubscribeRef.current();
         syncUnsubscribeRef.current = null;
@@ -1074,9 +1184,15 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
   useEffect(() => {
     // Skip if this is a remote update (prevents infinite loop)
     if (isRemoteUpdateRef.current) return;
+
+    // Skip if we are still bootstrapping sync
+    if (isSyncInitializingRef.current) return;
     
     // Skip if sync is not enabled
     if (!isSyncEnabled()) return;
+
+    // Critical safety: don't push until we've successfully read the room once (or created it)
+    if (!hasRemoteBaselineRef.current) return;
     
     // Debounce the push to avoid too many writes
     const timeout = setTimeout(() => {
@@ -1091,6 +1207,8 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
   // Push changes when page visibility changes (user switches apps on mobile)
   useEffect(() => {
     const handleVisibilityChange = () => {
+      if (isSyncInitializingRef.current) return;
+      if (!hasRemoteBaselineRef.current) return;
       if (document.visibilityState === 'hidden' && isSyncEnabled()) {
         // Push immediately without debounce when going to background
         pushChanges({ todos, routines, notes }).catch(err => {
@@ -1133,14 +1251,13 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
     const success = await createSyncRoom(code, { todos, routines, notes });
     
     if (success) {
+      // Room exists and we know its baseline (our current state).
+      hasRemoteBaselineRef.current = true;
       // Set up real-time listener
       const unsubscribe = subscribeToChanges(
         (data: SyncData) => {
-          isRemoteUpdateRef.current = true;
-          if (data.todos) setTodos(data.todos);
-          if (data.routines) setRoutines(data.routines);
-          if (data.notes) setNotes(data.notes);
-          setTimeout(() => { isRemoteUpdateRef.current = false; }, 100);
+          hasRemoteBaselineRef.current = true;
+          applyRemoteData(data);
         },
         () => setSyncStatus('error')
       );
@@ -1162,21 +1279,15 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
     const data = await joinSyncRoom(code);
     
     if (data) {
+      hasRemoteBaselineRef.current = true;
       // Update local state with remote data
-      isRemoteUpdateRef.current = true;
-      if (data.todos) setTodos(data.todos);
-      if (data.routines) setRoutines(data.routines);
-      if (data.notes) setNotes(data.notes);
-      setTimeout(() => { isRemoteUpdateRef.current = false; }, 100);
+      applyRemoteData(data);
       
       // Set up real-time listener
       const unsubscribe = subscribeToChanges(
         (remoteData: SyncData) => {
-          isRemoteUpdateRef.current = true;
-          if (remoteData.todos) setTodos(remoteData.todos);
-          if (remoteData.routines) setRoutines(remoteData.routines);
-          if (remoteData.notes) setNotes(remoteData.notes);
-          setTimeout(() => { isRemoteUpdateRef.current = false; }, 100);
+          hasRemoteBaselineRef.current = true;
+          applyRemoteData(remoteData);
         },
         () => setSyncStatus('error')
       );
