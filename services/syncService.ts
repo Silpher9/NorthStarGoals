@@ -200,7 +200,8 @@ export const pushChanges = async (
 // Subscribe to real-time changes
 export const subscribeToChanges = (
   onDataChange: (data: SyncData) => void,
-  onError?: (error: Error) => void
+  onError?: (error: Error) => void,
+  onRoomMissing?: () => void
 ): Unsubscribe | null => {
   const state = getSyncState();
   
@@ -214,20 +215,25 @@ export const subscribeToChanges = (
     return onSnapshot(
       docRef,
       (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data() as SyncData;
+        if (!docSnap.exists()) {
+          // The room doc was deleted / doesn't exist yet.
+          // Surface this to the caller so it can safely recreate the room.
+          if (onRoomMissing) onRoomMissing();
+          return;
+        }
+
+        const data = docSnap.data() as SyncData;
+        
+        // Only trigger callback if change came from another device
+        // This prevents infinite loops when we push our own changes
+        if (data.deviceId !== state.deviceId) {
+          onDataChange(data);
           
-          // Only trigger callback if change came from another device
-          // This prevents infinite loops when we push our own changes
-          if (data.deviceId !== state.deviceId) {
-            onDataChange(data);
-            
-            // Update last synced time
-            saveSyncState({
-              ...state,
-              lastSyncedAt: Date.now()
-            });
-          }
+          // Update last synced time
+          saveSyncState({
+            ...state,
+            lastSyncedAt: Date.now()
+          });
         }
       },
       (error) => {

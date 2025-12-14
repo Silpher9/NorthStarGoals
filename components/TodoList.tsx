@@ -1151,6 +1151,21 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
           (error) => {
             console.error('Sync error:', error);
             setSyncStatus('error');
+          },
+          () => {
+            if (cancelled) return;
+            // Room doc is missing (deleted). Treat this as a safe baseline and recreate it by pushing local.
+            if (hasRemoteBaselineRef.current) return;
+            hasRemoteBaselineRef.current = true;
+
+            const localTodos = todosRef.current || [];
+            const localRoutines = routinesRef.current || [];
+            const localNotes = notesRef.current || [];
+
+            pushChanges({ todos: localTodos, routines: localRoutines, notes: localNotes }).catch(err => {
+              console.error('Failed to recreate missing sync room:', err);
+              setSyncStatus('error');
+            });
           }
         );
 
@@ -1259,7 +1274,20 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
           hasRemoteBaselineRef.current = true;
           applyRemoteData(data);
         },
-        () => setSyncStatus('error')
+        () => setSyncStatus('error'),
+        () => {
+          // Room doc missing (deleted). Recreate it from our local state.
+          if (hasRemoteBaselineRef.current) return;
+          hasRemoteBaselineRef.current = true;
+          pushChanges({
+            todos: todosRef.current || [],
+            routines: routinesRef.current || [],
+            notes: notesRef.current || []
+          }).catch(err => {
+            console.error('Failed to recreate missing sync room:', err);
+            setSyncStatus('error');
+          });
+        }
       );
       
       if (unsubscribe) {
@@ -1289,7 +1317,20 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
           hasRemoteBaselineRef.current = true;
           applyRemoteData(remoteData);
         },
-        () => setSyncStatus('error')
+        () => setSyncStatus('error'),
+        () => {
+          // Room doc missing (deleted). Recreate it from our local state.
+          if (hasRemoteBaselineRef.current) return;
+          hasRemoteBaselineRef.current = true;
+          pushChanges({
+            todos: todosRef.current || [],
+            routines: routinesRef.current || [],
+            notes: notesRef.current || []
+          }).catch(err => {
+            console.error('Failed to recreate missing sync room:', err);
+            setSyncStatus('error');
+          });
+        }
       );
       
       if (unsubscribe) {
