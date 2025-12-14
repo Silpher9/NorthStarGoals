@@ -11,7 +11,9 @@ import {
     subscribeToChanges, 
     disconnectSync,
     isSyncEnabled,
-    SyncData
+    SyncData,
+    forceSync,
+    getLastSyncedAt
 } from '../services/syncService';
 
 // Lazy load heavy components
@@ -786,9 +788,11 @@ const GoalManagementView: React.FC<GoalManagementViewProps> = ({
 
 interface TodoListProps {
   onGoalsChange?: (goals: Todo[]) => void;
+  onSyncStateChange?: (state: { status: 'disconnected' | 'connecting' | 'connected' | 'error'; lastSyncedAt: number | null }) => void;
+  onForceSyncReady?: (handler: () => Promise<{ success: boolean; error?: string }>) => void;
 }
 
-const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
+const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, onForceSyncReady }) => {
   const [todos, setTodos] = useState<Todo[]>(() => {
     try {
       const saved = localStorage.getItem('todos');
@@ -1083,6 +1087,44 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange }) => {
     
     return () => clearTimeout(timeout);
   }, [todos, routines, notes]);
+
+  // Push changes when page visibility changes (user switches apps on mobile)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && isSyncEnabled()) {
+        // Push immediately without debounce when going to background
+        pushChanges({ todos, routines, notes }).catch(err => {
+          console.error('Failed to push on visibility change:', err);
+        });
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [todos, routines, notes]);
+
+  // Force sync handler for external use (e.g., sync button)
+  const handleForceSync = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+    if (!isSyncEnabled()) {
+      return { success: false, error: 'Sync not enabled' };
+    }
+    const result = await forceSync({ todos, routines, notes });
+    return result;
+  }, [todos, routines, notes]);
+
+  // Notify parent of sync state changes
+  useEffect(() => {
+    if (onSyncStateChange) {
+      onSyncStateChange({ status: syncStatus, lastSyncedAt: getLastSyncedAt() });
+    }
+  }, [syncStatus, onSyncStateChange]);
+
+  // Provide force sync handler to parent
+  useEffect(() => {
+    if (onForceSyncReady) {
+      onForceSyncReady(handleForceSync);
+    }
+  }, [handleForceSync, onForceSyncReady]);
 
   // Sync handlers
   const handleEnableSync = useCallback(async (code: string): Promise<boolean> => {

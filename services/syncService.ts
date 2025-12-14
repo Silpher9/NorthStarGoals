@@ -263,3 +263,37 @@ export const isSyncEnabled = (): boolean => {
 export const getLastSyncedAt = (): number | null => {
   return getSyncState().lastSyncedAt;
 };
+
+// Force sync - push current data and return success/failure
+export const forceSync = async (
+  data: { todos: Todo[]; routines: Routine[]; notes: Note[] }
+): Promise<{ success: boolean; error?: string }> => {
+  const state = getSyncState();
+  
+  if (!state.enabled || !state.syncCode) {
+    return { success: false, error: 'Sync not enabled' };
+  }
+  
+  try {
+    const docRef = doc(db, 'syncRooms', state.syncCode);
+    
+    await updateDoc(docRef, {
+      todos: data.todos,
+      routines: data.routines,
+      notes: data.notes,
+      lastUpdated: serverTimestamp(),
+      deviceId: state.deviceId
+    });
+    
+    // Update last synced time
+    saveSyncState({
+      ...state,
+      lastSyncedAt: Date.now()
+    });
+    
+    return { success: true };
+  } catch (e) {
+    console.error('Force sync failed:', e);
+    return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
+  }
+};

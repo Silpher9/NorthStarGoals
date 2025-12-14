@@ -1,12 +1,20 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { RefreshCw, Check, AlertCircle, Cloud, CloudOff } from 'lucide-react';
 import { Todo } from '../types';
+
+interface SyncState {
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
+  lastSyncedAt: number | null;
+}
 
 interface StarryNightProps {
   goals?: Todo[];
+  syncState?: SyncState;
+  onForceSync?: () => Promise<{ success: boolean; error?: string }>;
 }
 
-const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
+const StarryNight: React.FC<StarryNightProps> = ({ goals = [], syncState, onForceSync }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   
   // ThreeJS References
@@ -855,6 +863,30 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
 
   }, [goals]);
 
+  // Sync button state
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<'none' | 'success' | 'error'>('none');
+
+  const handleSyncClick = async () => {
+    if (!onForceSync || isSyncing) return;
+    
+    setIsSyncing(true);
+    setSyncFeedback('none');
+    
+    try {
+      const result = await onForceSync();
+      setSyncFeedback(result.success ? 'success' : 'error');
+    } catch {
+      setSyncFeedback('error');
+    } finally {
+      setIsSyncing(false);
+      // Clear feedback after 2 seconds
+      setTimeout(() => setSyncFeedback('none'), 2000);
+    }
+  };
+
+  const isConnected = syncState?.status === 'connected';
+
   return (
     <div 
       ref={mountRef} 
@@ -866,6 +898,36 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
             </h1>
             <p className="text-[10px] text-slate-400 tracking-widest mt-1 uppercase">Constellation of Goals</p>
         </div>
+
+        {/* Sync Button - only show if sync is enabled */}
+        {syncState && syncState.status !== 'disconnected' && (
+          <button
+            onClick={handleSyncClick}
+            disabled={isSyncing || !isConnected}
+            className={`absolute top-4 right-4 z-30 p-2 rounded-full transition-all duration-300 ${
+              syncFeedback === 'success' 
+                ? 'bg-green-500/20 text-green-400' 
+                : syncFeedback === 'error'
+                ? 'bg-red-500/20 text-red-400'
+                : isConnected
+                ? 'bg-slate-800/50 text-slate-400 hover:bg-slate-700/50 hover:text-white'
+                : 'bg-slate-800/30 text-slate-600'
+            } backdrop-blur-sm border border-slate-700/50`}
+            title={isConnected ? 'Force sync now' : 'Sync disconnected'}
+          >
+            {isSyncing ? (
+              <RefreshCw size={16} className="animate-spin" />
+            ) : syncFeedback === 'success' ? (
+              <Check size={16} />
+            ) : syncFeedback === 'error' ? (
+              <AlertCircle size={16} />
+            ) : isConnected ? (
+              <Cloud size={16} />
+            ) : (
+              <CloudOff size={16} />
+            )}
+          </button>
+        )}
 
         {goals.map(goal => {
              if (goal.parentId) return null;
@@ -910,6 +972,11 @@ const StarryNight: React.FC<StarryNightProps> = ({ goals = [] }) => {
 };
 
 export default React.memo(StarryNight, (prev, next) => {
+    // Check sync state changes
+    if (prev.syncState?.status !== next.syncState?.status) return false;
+    if (prev.syncState?.lastSyncedAt !== next.syncState?.lastSyncedAt) return false;
+    
+    // Check goals changes
     if (prev.goals?.length !== next.goals?.length) return false;
     const p = prev.goals || [];
     const n = next.goals || [];
