@@ -1,48 +1,64 @@
 # NorthStarGoals Cursor Rules
 
-## Commit message format
+## 🚨 REQUIRED PRE-COMMIT CHECKLIST
+
+Before creating ANY git commit, automatically check and follow this:
+
+- Is this a 🐛 :fix: commit? → Run `npm version patch --no-git-tag-version` FIRST
+- Is this a ✨ :feat: commit? → Run `npm version minor --no-git-tag-version` FIRST
+- Is this a breaking change? → Run `npm version major --no-git-tag-version` FIRST
+- Is it 📝 :docs:, 🎨 :style:, ♻️ :refactor:, or ✅ :test:? → No version bump needed
+
+**The version bump MUST be included in the same commit as the code changes.**
+
+**DO THIS AUTOMATICALLY - DO NOT ASK THE USER TO DO IT.**
+
+---
+
+## Commit message format & Versioning
 
 Commit subjects must start with an emoji + type:
 
-- 🐛 :fix: ...
-- ✨ :feat: ...
-- 📝 :docs: ...
-- 🎨 :style: ...
-- ♻️ :refactor: ...
-- 🚀 :perf: ...
-- ✅ :test: ...
+- 🐛 :fix: ... ⚠️ **MUST bump PATCH version** (e.g. 1.1.0 → 1.1.1)
+- ✨ :feat: ... ⚠️ **MUST bump MINOR version** (e.g. 1.1.0 → 1.2.0)
+- 📝 :docs: ... (no version bump)
+- 🎨 :style: ... (no version bump)
+- ♻️ :refactor: ... (no version bump)
+- 🚀 :perf: ... (no version bump unless it changes behavior)
+- ✅ :test: ... (no version bump)
 
-## Versioning (SemVer)
+### Breaking Changes
+
+Any breaking change (indicated by `!` in the type like `:feat!:` or a `BREAKING CHANGE` footer) **MUST bump MAJOR version** (e.g. 1.1.0 → 2.0.0)
+
+---
+
+## Versioning Workflow (SemVer)
 
 The app version is stored in `package.json` as `version` (MAJOR.MINOR.PATCH) and is displayed in the UI.
 
-### When making a commit
+### MANDATORY REQUIREMENT - NO EXCEPTIONS
 
-If you are asked to create a new git commit, you MUST:
+When creating a commit with :fix: or :feat:, you MUST automatically bump the package.json version using npm commands BEFORE making the commit. The version bump and code changes go in the SAME commit.
 
-1. Determine the commit type from the commit message (`:fix:`, `:feat:`, breaking `!`, or a `BREAKING CHANGE` note).
-2. Bump `package.json` version accordingly (and include it in the same commit).
+### Commands to use:
 
-### Bump rules
+# For :fix: commits
+npm version patch --no-git-tag-version
 
-- `🐛 :fix:` => PATCH bump (e.g. 1.1.0 -> 1.1.1)
-- `✨ :feat:` => MINOR bump (e.g. 1.1.0 -> 1.2.0)
-- Any breaking change (`!` in the type or `BREAKING CHANGE`) => MAJOR bump (e.g. 1.1.0 -> 2.0.0)
+# For :feat: commits
+npm version minor --no-git-tag-version
 
-### No bump required
+# For breaking changes
+npm version major --no-git-tag-version
 
-- `📝 :docs:`
-- `🎨 :style:`
-- `♻️ :refactor:`
-- `🚀 :perf:` (unless it changes behavior)
-- `✅ :test:`
 
-### Preferred workflow
+Workflow:
 
-Use npm to update the version number (no tag):
+1. FIRST: Run the appropriate npm version command above
 
-- patch: `npm version patch --no-git-tag-version`
-- minor: `npm version minor --no-git-tag-version`
-- major: `npm version major --no-git-tag-version`
+2. THEN: Stage the updated package.json along with your code changes
 
-Then commit both code changes and `package.json` version bump together.
+3. FINALLY: Create the commit with both changes together
+
+⚠️ DO NOT create :fix: or :feat: commits without bumping the version first!
