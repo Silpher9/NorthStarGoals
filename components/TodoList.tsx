@@ -4,6 +4,25 @@ import TodoItem from './TodoItem';
 import RoutineManager from './RoutineManager';
 import { Todo, Note, Routine } from '../types';
 import { breakDownTask, generateTasksFromNote } from '../services/geminiService';
+import {
+    DndContext,
+    DragEndEvent,
+    DragOverlay,
+    DragStartEvent,
+    DragOverEvent,
+    closestCenter,
+    PointerSensor,
+    KeyboardSensor,
+    TouchSensor,
+    useSensor,
+    useSensors,
+    useDroppable,
+} from '@dnd-kit/core';
+import {
+    SortableContext,
+    verticalListSortingStrategy,
+    arrayMove,
+} from '@dnd-kit/sortable';
 import { 
     createSyncRoom, 
     joinSyncRoom, 
@@ -452,6 +471,7 @@ interface ProjectViewProps {
     onSetDuration: (id: string, durationMinutes: number) => void;
     onBuyback: (id: string, cost: number) => void;
     onBreakDown: (id: string) => Promise<void>;
+    onReorderTasks?: (updates: Array<{ id: string; order?: number; parentId?: string }>) => void;
     totalPlannedTime: number;
 }
 
@@ -472,8 +492,14 @@ const ProjectView: React.FC<ProjectViewProps> = ({
     onSetDuration,
     onBuyback,
     onBreakDown,
+    onReorderTasks,
     totalPlannedTime
 }) => {
+    // Drag and drop state
+    const [activeId, setActiveId] = useState<string | null>(null);
+    const [overId, setOverId] = useState<string | null>(null);
+    const [isDragging, setIsDragging] = useState(false);
+    
     // Determine style based on goal category or default to normal/purple
     const tier = (goal.goalCategory as GoalTier) || 'normal';
     
@@ -493,70 +519,255 @@ const ProjectView: React.FC<ProjectViewProps> = ({
         }
     };
 
-    const activeTasks = tasks.filter(t => !t.completed);
-    const completedTasks = tasks.filter(t => t.completed);
+    // Sort tasks by order field (or createdAt as fallback)
+    const sortedTasks = useMemo(() => {
+        return [...tasks].sort((a, b) => {
+            // If both have order, sort by order
+            if (a.order !== undefined && b.order !== undefined) {
+                return a.order - b.order;
+            }
+            // If only one has order, it comes first
+            if (a.order !== undefined) return -1;
+            if (b.order !== undefined) return 1;
+            // Otherwise sort by createdAt
+            return a.createdAt - b.createdAt;
+        });
+    }, [tasks]);
+
+    const activeTasks = sortedTasks.filter(t => !t.completed);
+    const completedTasks = sortedTasks.filter(t => t.completed);
 
     const isProject = goal.label === 'goal';
+    
+    // Configure drag sensors
+    const sensors = useSensors(
+        useSensor(PointerSensor, {
+            activationConstraint: {
+                distance: 8, // 8px of movement required before drag starts
+            },
+        }),
+        useSensor(TouchSensor, {
+            activationConstraint: {
+                delay: 250, // 250ms hold required on touch devices
+                tolerance: 5,
+            },
+        }),
+        useSensor(KeyboardSensor)
+    );
+    
+    // Check if a task is a descendant of another (to prevent circular nesting)
+    const isDescendantOf = useCallback((childId: string, potentialParentId: string): boolean => {
+        let currentId: string | undefined = childId;
+        while (currentId) {
+            if (currentId === potentialParentId) return true;
+            const current = allTodos.find(t => t.id === currentId);
+            currentId = current?.parentId;
+        }
+        return false;
+    }, [allTodos]);
+    
+    const handleDragStart = (event: DragStartEvent) => {
+        setActiveId(event.active.id as string);
+        setIsDragging(true);
+    };
+    
+    const handleDragOver = (event: DragOverEvent) => {
+        setOverId(event.over?.id as string | null);
+    };
+    
+    // Promotion Zone Component
+    const PromotionZone: React.FC = () => {
+        const { setNodeRef, isOver } = useDroppable({
+            id: 'promotion-zone',
+        });
+        
+        const activeTask = activeId ? allTodos.find(t => t.id === activeId) : null;
+        const hasParent = activeTask?.parentId && activeTask.parentId !== goal.id;
+        
+        // Only show if dragging a nested task
+        if (!activeId || !hasParent) return null;
+        
+        return (
+            <div
+                ref={setNodeRef}
+                className={`
+                    mb-4 p-4 rounded-xl border-2 border-dashed transition-all
+                    ${isOver 
+                        ? 'border-emerald-500 bg-emerald-500/10 scale-105' 
+                        : 'border-slate-700 bg-slate-800/30 hover:border-slate-600'
+                    }
+                `}
+            >
+                <div className="flex items-center justify-center gap-2 text-sm">
+                    <ChevronLeft size={16} className={isOver ? 'text-emerald-400' : 'text-slate-500'} />
+                    <span className={isOver ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                        Drop here to promote to parent level
+                    </span>
+                </div>
+            </div>
+        );
+    };
+    
+    const handleDragEnd = (event: DragEndEvent) => {
+        const { active, over } = event;
+        setActiveId(null);
+        setOverId(null);
+        setIsDragging(false);
+        
+        if (!over || !onReorderTasks) return;
+        
+        const activeId = active.id as string;
+        const overId = over.id as string;
+        
+        if (activeId === overId) return;
+        
+        const activeTask = allTodos.find(t => t.id === activeId);
+        
+        if (!activeTask) return;
+        
+        // Handle nest zone: nest-{taskId}
+        if (overId.startsWith('nest-')) {
+            const targetTaskId = overId.replace('nest-', '');
+            const targetTask = allTodos.find(t => t.id === targetTaskId);
+            
+            if (!targetTask) return;
+            
+            // Prevent circular nesting
+            if (isDescendantOf(targetTaskId, activeId)) {
+                console.warn('Cannot nest a parent inside its own child');
+                return;
+            }
+            
+            // NEST: Make dragged task a child of target
+            const siblings = allTodos.filter(t => t.parentId === targetTaskId && t.id !== activeId);
+            const newOrder = siblings.length > 0 
+                ? Math.max(...siblings.map(t => t.order ?? 0)) + 1 
+                : 0;
+            
+            onReorderTasks([{
+                id: activeId,
+                parentId: targetTaskId,
+                order: newOrder
+            }]);
+            return;
+        }
+        
+        // Handle unnest zone: unnest-{taskId}
+        if (overId.startsWith('unnest-')) {
+            const taskId = overId.replace('unnest-', '');
+            if (taskId !== activeId) return;
+            
+            // UNNEST: Move task to parent level (same level as current parent)
+            const parent = allTodos.find(t => t.id === activeTask.parentId);
+            if (!parent) return; // Already at root level
+            
+            const newParentId = parent.parentId || goal.id;
+            const siblings = allTodos.filter(t => t.parentId === newParentId && t.id !== activeId);
+            
+            // Find parent's position and place promoted task right after it
+            const parentIndex = siblings.findIndex(t => t.id === parent.id);
+            const newOrder = parentIndex !== -1 
+                ? (siblings[parentIndex]?.order ?? 0) + 0.5 
+                : (siblings.length > 0 ? Math.max(...siblings.map(t => t.order ?? 0)) + 1 : 0);
+            
+            onReorderTasks([{
+                id: activeId,
+                parentId: newParentId === goal.id ? goal.id : newParentId,
+                order: newOrder
+            }]);
+            return;
+        }
+        
+        // Special handling for promotion zone
+        if (overId === 'promotion-zone') {
+            // PROMOTE: Move task to parent level (same level as current parent)
+            const parent = allTodos.find(t => t.id === activeTask.parentId);
+            if (!parent) return; // Already at root level
+            
+            const newParentId = parent.parentId || goal.id;
+            const siblings = allTodos.filter(t => t.parentId === newParentId && t.id !== activeId);
+            
+            // Find parent's position and place promoted task right after it
+            const parentIndex = siblings.findIndex(t => t.id === parent.id);
+            const newOrder = parentIndex !== -1 
+                ? (siblings[parentIndex]?.order ?? 0) + 0.5 
+                : (siblings.length > 0 ? Math.max(...siblings.map(t => t.order ?? 0)) + 1 : 0);
+            
+            onReorderTasks([{
+                id: activeId,
+                parentId: newParentId === goal.id ? goal.id : newParentId,
+                order: newOrder
+            }]);
+            return;
+        }
+        
+        const overTask = allTodos.find(t => t.id === overId);
+        if (!overTask) return;
+        
+        // Check if we're at the same parent level
+        const sameParent = activeTask.parentId === overTask.parentId;
+        
+        if (sameParent) {
+            // REORDER: Same level reordering
+            const oldIndex = activeTasks.findIndex(t => t.id === activeId);
+            const newIndex = activeTasks.findIndex(t => t.id === overId);
+            
+            if (oldIndex !== -1 && newIndex !== -1) {
+                const reorderedTasks = arrayMove(activeTasks, oldIndex, newIndex);
+                const updates = reorderedTasks.map((task, index) => ({
+                    id: task.id,
+                    order: index
+                }));
+                onReorderTasks(updates);
+            }
+        }
+    };
 
     return (
-        <div className="h-full flex flex-col relative bg-slate-900/50">
-            {/* Header */}
-            <div className={`p-4 border-b border-slate-800 flex items-center gap-4 bg-slate-900/95 md:bg-slate-900/80 md:backdrop-blur sticky top-0 z-10`}>
-                <button onClick={onBack} className="p-3 hover:bg-slate-800 rounded-full text-slate-400 transition-colors">
-                    <ChevronLeft size={20} />
-                </button>
-                <div className="flex-grow">
-                    <div className="flex items-center gap-2">
-                        {isProject ? <FolderOpen size={16} className={s.text} /> : <List size={16} className={s.text} />}
-                        <h2 className={`text-lg font-bold uppercase tracking-widest ${s.text} truncate pr-2`}>{goal.text}</h2>
+        <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragEnd={handleDragEnd}
+        >
+            <div className="h-full flex flex-col relative bg-slate-900/50">
+                {/* Header */}
+                <div className={`p-4 border-b border-slate-800 flex items-center gap-4 bg-slate-900/95 md:bg-slate-900/80 md:backdrop-blur sticky top-0 z-10`}>
+                    <button onClick={onBack} className="p-3 hover:bg-slate-800 rounded-full text-slate-400 transition-colors">
+                        <ChevronLeft size={20} />
+                    </button>
+                    <div className="flex-grow">
+                        <div className="flex items-center gap-2">
+                            {isProject ? <FolderOpen size={16} className={s.text} /> : <List size={16} className={s.text} />}
+                            <h2 className={`text-lg font-bold uppercase tracking-widest ${s.text} truncate pr-2`}>{goal.text}</h2>
+                        </div>
+                        <p className="text-[10px] text-slate-500 uppercase tracking-wide mt-0.5">
+                            {isProject ? 'Project View - Drag to Reorder • Drop on zones to Nest/Unnest' : 'Task View - Drag to Reorder • Drop on zones to Nest/Unnest'}
+                        </p>
                     </div>
-                    <p className="text-[10px] text-slate-500 uppercase tracking-wide mt-0.5">
-                        {isProject ? 'Project View - Add Subgoals' : 'Task View - Add Subtasks'}
-                    </p>
+                    <button 
+                        onClick={handleDeleteProject}
+                        className="p-3 rounded-full hover:bg-red-900/20 text-slate-600 hover:text-red-400 transition-colors"
+                        title="Delete"
+                    >
+                        <Trash2 size={18} />
+                    </button>
                 </div>
-                <button 
-                    onClick={handleDeleteProject}
-                    className="p-3 rounded-full hover:bg-red-900/20 text-slate-600 hover:text-red-400 transition-colors"
-                    title="Delete"
-                >
-                    <Trash2 size={18} />
-                </button>
-            </div>
 
-            {/* Task List */}
-            <div className="flex-grow overflow-y-auto p-4 pb-28 space-y-2">
-                {activeTasks.length === 0 && completedTasks.length === 0 && (
-                     <div className="text-center text-slate-600 mt-12">
-                        <p>{isProject ? "No subgoals in this project yet." : "No nested tasks yet."}</p>
-                        <p className="text-xs mt-2 text-slate-700">Add tasks below to break down your work.</p>
-                     </div>
-                )}
-                
-                {activeTasks.map(todo => (
-                    <TodoItem 
-                        key={todo.id} 
-                        todo={todo} 
-                        onToggle={onToggle} 
-                        onDelete={onDelete}
-                        allTodos={allTodos}
-                        labelOptions={labelOptions}
-                        onAddSubTask={onAddSubTask}
-                        onUpdateDescription={onUpdateDescription}
-                        onUpdateText={onUpdateText}
-                        onUpdateLabel={onUpdateLabel}
-                        onActivate={onActivate}
-                        onSetDuration={onSetDuration}
-                        onBuyback={onBuyback}
-                        onBreakDown={onBreakDown}
-                        parentTier={goal.goalCategory} // Pass project tier down for multipliers
-                        viewContext="orbit"
-                    />
-                ))}
-
-                {completedTasks.length > 0 && (
-                    <div className="mt-8">
-                        <div className="text-xs font-bold uppercase text-slate-600 mb-2 px-1">Completed</div>
-                        {completedTasks.map(todo => (
+                {/* Task List */}
+                <div className="flex-grow overflow-y-auto p-4 pb-28 space-y-2">
+                    {activeTasks.length === 0 && completedTasks.length === 0 && (
+                         <div className="text-center text-slate-600 mt-12">
+                            <p>{isProject ? "No subgoals in this project yet." : "No nested tasks yet."}</p>
+                            <p className="text-xs mt-2 text-slate-700">Add tasks below to break down your work.</p>
+                         </div>
+                    )}
+                    
+                    <PromotionZone />
+                    
+                    <SortableContext items={activeTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
+                        {activeTasks.map(todo => (
                             <TodoItem 
                                 key={todo.id} 
                                 todo={todo} 
@@ -572,19 +783,49 @@ const ProjectView: React.FC<ProjectViewProps> = ({
                                 onSetDuration={onSetDuration}
                                 onBuyback={onBuyback}
                                 onBreakDown={onBreakDown}
-                                parentTier={goal.goalCategory}
+                                parentTier={goal.goalCategory} // Pass project tier down for multipliers
                                 viewContext="orbit"
+                                isDraggable={true}
+                                showNestZones={isDragging}
+                                draggedTaskId={activeId}
                             />
                         ))}
-                    </div>
-                )}
-            </div>
+                    </SortableContext>
 
-            {/* Input Area */}
-            <div className="absolute bottom-0 left-0 w-full p-4 bg-gradient-to-t from-[#0f172a] via-[#0f172a] to-transparent z-20">
-                <ProjectTaskForm onAdd={onAddTask} goalText={goal.text} style={s} labelOptions={labelOptions} />
+                    {completedTasks.length > 0 && (
+                        <div className="mt-8">
+                            <div className="text-xs font-bold uppercase text-slate-600 mb-2 px-1">Completed</div>
+                            {completedTasks.map(todo => (
+                                <TodoItem 
+                                    key={todo.id} 
+                                    todo={todo} 
+                                    onToggle={onToggle} 
+                                    onDelete={onDelete}
+                                    allTodos={allTodos}
+                                    labelOptions={labelOptions}
+                                    onAddSubTask={onAddSubTask}
+                                    onUpdateDescription={onUpdateDescription}
+                                    onUpdateText={onUpdateText}
+                                    onUpdateLabel={onUpdateLabel}
+                                    onActivate={onActivate}
+                                    onSetDuration={onSetDuration}
+                                    onBuyback={onBuyback}
+                                    onBreakDown={onBreakDown}
+                                    parentTier={goal.goalCategory}
+                                    viewContext="orbit"
+                                    isDraggable={false}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Input Area */}
+                <div className="absolute bottom-0 left-0 w-full p-4 bg-gradient-to-t from-[#0f172a] via-[#0f172a] to-transparent z-20">
+                    <ProjectTaskForm onAdd={onAddTask} goalText={goal.text} style={s} labelOptions={labelOptions} />
+                </div>
             </div>
-        </div>
+        </DndContext>
     );
 };
 
@@ -663,7 +904,20 @@ const GoalManagementView: React.FC<GoalManagementViewProps> = ({
         };
     }, [totalPlannedTime]);
 
+    // Setup drag and drop sensors
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+        useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
+        useSensor(KeyboardSensor)
+    );
+
+    // Minimal drag handlers (orbit view doesn't need drag reordering for now)
+    const handleDragEnd = () => {
+        // No-op for now, just provides context for TodoItem hooks
+    };
+
     return (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <div className="h-full overflow-y-auto p-6 pb-32">
             <div className="text-center mb-8">
                 <h2 className="text-2xl font-light tracking-[0.2em] text-white">ORBITAL COMMAND</h2>
@@ -784,6 +1038,7 @@ const GoalManagementView: React.FC<GoalManagementViewProps> = ({
                 </div>
             </div>
         </div>
+        </DndContext>
     );
 };
 
@@ -1508,6 +1763,23 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
       setTodos(prev => prev.map(t => t.id === id ? { ...t, customLabel: customLabel || undefined } : t));
   }, []);
   
+  const handleReorderTasks = useCallback((updates: Array<{ id: string; order?: number; parentId?: string }>) => {
+      setTodos(prev => {
+          const updatesMap = new Map(updates.map(u => [u.id, u]));
+          return prev.map(t => {
+              const update = updatesMap.get(t.id);
+              if (update) {
+                  return {
+                      ...t,
+                      ...(update.order !== undefined && { order: update.order }),
+                      ...(update.parentId !== undefined && { parentId: update.parentId })
+                  };
+              }
+              return t;
+          });
+      });
+  }, []);
+  
   const activateTask = useCallback((id: string) => {
       const now = new Date();
       // Set deadline to next midnight (24:00 today)
@@ -1812,6 +2084,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
                 onSetDuration={setTaskDuration}
                 onBuyback={buybackTask}
                 onBreakDown={handleBreakDown}
+                onReorderTasks={handleReorderTasks}
                 totalPlannedTime={totalPlannedMinutes}
             />
           );

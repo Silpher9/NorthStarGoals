@@ -1,7 +1,11 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { Todo } from '../types';
-import { Trash2, Check, Clock, Trophy, FolderOpen, ChevronRight, ChevronDown, Plus, CornerDownRight, AlignLeft, Layers, Zap, Tag, Lock, Timer, RefreshCcw, Play, Pause, Archive, RotateCcw, X as XIcon, Edit3, Rocket, Eye, EyeOff, Flame } from 'lucide-react';
+import { Trash2, Check, Clock, Trophy, FolderOpen, ChevronRight, ChevronDown, Plus, CornerDownRight, AlignLeft, Layers, Zap, Tag, Lock, Timer, RefreshCcw, Play, Pause, Archive, RotateCcw, X as XIcon, Edit3, Rocket, Eye, EyeOff, Flame, GripVertical } from 'lucide-react';
 import RichTextEditor from './RichTextEditor';
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { useDroppable } from '@dnd-kit/core';
 import { 
   TIER_MULTIPLIERS, 
   getTierFromTodo, 
@@ -29,6 +33,9 @@ interface TodoItemProps {
   onOpen?: (id: string) => void;
   viewContext?: 'orbit' | 'today' | 'list';
   visibleIds?: Set<string>;
+  isDraggable?: boolean;
+  showNestZones?: boolean;
+  draggedTaskId?: string | null;
 }
 
 const TodoItem: React.FC<TodoItemProps> = ({ 
@@ -49,7 +56,10 @@ const TodoItem: React.FC<TodoItemProps> = ({
   onToggleTimer,
   onOpen,
   viewContext = 'list',
-  visibleIds
+  visibleIds,
+  isDraggable = false,
+  showNestZones = false,
+  draggedTaskId = null
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isNotesExpanded, setIsNotesExpanded] = useState(false);
@@ -58,6 +68,38 @@ const TodoItem: React.FC<TodoItemProps> = ({
   
   // Visual Clutter Toggle
   const [showDetails, setShowDetails] = useState(true);
+  
+  // Drag and drop functionality
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ 
+    id: todo.id,
+    disabled: !isDraggable || todo.completed || todo.status === 'graveyard' || todo.status === 'archive',
+  });
+  
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  
+  // Nest zone droppable
+  const { setNodeRef: setNestRef, isOver: isNestOver } = useDroppable({
+    id: `nest-${todo.id}`,
+    disabled: !showNestZones || draggedTaskId === todo.id || todo.completed || todo.status === 'graveyard' || todo.status === 'archive',
+  });
+  
+  // Unnest zone droppable (only for nested tasks)
+  const hasParent = todo.parentId !== undefined && todo.parentId !== null;
+  const { setNodeRef: setUnnestRef, isOver: isUnnestOver } = useDroppable({
+    id: `unnest-${todo.id}`,
+    disabled: !showNestZones || !hasParent || draggedTaskId !== todo.id,
+  });
   
   // Activation / Duration Input State
   const [isActivating, setIsActivating] = useState(false);
@@ -548,11 +590,26 @@ const TodoItem: React.FC<TodoItemProps> = ({
         )}
 
         <div 
+        ref={setNodeRef}
+        style={style}
         className={`
             group flex items-center gap-3 p-4 rounded-xl border relative
             ${containerClasses}
+            ${isDragging ? 'scale-95 shadow-2xl z-50' : ''}
         `}
         >
+        {/* Drag Handle */}
+        {isDraggable && !isContextParent && (
+            <div
+                {...attributes}
+                {...listeners}
+                className="flex-shrink-0 cursor-grab active:cursor-grabbing text-slate-600 hover:text-indigo-400 transition-colors p-1 -ml-2"
+                title="Drag to reorder • Drop on yellow zone to nest • Drop on purple zone to unnest"
+            >
+                <GripVertical size={18} />
+            </div>
+        )}
+        
         {!isGraveyard && !isArchived && (hasSubTasks || todo.description) && (
             <button
                 onClick={() => setIsExpanded(!isExpanded)}
@@ -840,6 +897,49 @@ const TodoItem: React.FC<TodoItemProps> = ({
             )}
 
         </div>
+
+        {/* Nest/Unnest Drop Zones */}
+        {showNestZones && draggedTaskId !== todo.id && !todo.completed && !isGraveyard && !isArchived && (
+            <div
+                ref={setNestRef}
+                className={`
+                    flex-shrink-0 px-3 py-2 rounded-lg border-2 transition-all cursor-pointer
+                    ${isNestOver 
+                        ? 'bg-yellow-500/20 border-yellow-500 scale-105' 
+                        : 'bg-yellow-500/5 border-yellow-500/30 hover:bg-yellow-500/10'
+                    }
+                `}
+                title="Drop here to nest task inside"
+            >
+                <div className="flex items-center gap-1.5">
+                    <Layers size={14} className="text-yellow-500" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-yellow-500">
+                        Nest
+                    </span>
+                </div>
+            </div>
+        )}
+        
+        {showNestZones && draggedTaskId === todo.id && hasParent && (
+            <div
+                ref={setUnnestRef}
+                className={`
+                    flex-shrink-0 px-3 py-2 rounded-lg border-2 transition-all cursor-pointer
+                    ${isUnnestOver 
+                        ? 'bg-purple-500/20 border-purple-500 scale-105' 
+                        : 'bg-purple-500/5 border-purple-500/30 hover:bg-purple-500/10'
+                    }
+                `}
+                title="Drop here to unnest (promote) task"
+            >
+                <div className="flex items-center gap-1.5">
+                    <ChevronLeft size={14} className="text-purple-500" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-500">
+                        Unnest
+                    </span>
+                </div>
+            </div>
+        )}
 
         <div className="flex items-center gap-1 flex-shrink-0">
             {/* Clutter Toggle Eye */}
@@ -1136,28 +1236,33 @@ const TodoItem: React.FC<TodoItemProps> = ({
                     </div>
                 )}
 
-                {activeVisibleSubTasks.map(subTodo => (
-                    <TodoItem
-                        key={subTodo.id}
-                        todo={subTodo}
-                        onToggle={onToggle}
-                        onDelete={onDelete}
-                        allTodos={allTodos}
-                        onAddSubTask={onAddSubTask}
-                        onUpdateDescription={onUpdateDescription}
-                        onUpdateText={onUpdateText}
-                        onUpdateLabel={onUpdateLabel}
-                        onActivate={onActivate}
-                        onSetDuration={onSetDuration}
-                        onBuyback={onBuyback}
-                        onBreakDown={onBreakDown}
-                        onToggleTimer={onToggleTimer}
-                        onOpen={onOpen}
-                        viewContext={viewContext}
-                        visibleIds={visibleIds}
-                        parentTier={effectiveTier}
-                    />
-                ))}
+                <SortableContext items={activeVisibleSubTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
+                    {activeVisibleSubTasks.map(subTodo => (
+                        <TodoItem
+                            key={subTodo.id}
+                            todo={subTodo}
+                            onToggle={onToggle}
+                            onDelete={onDelete}
+                            allTodos={allTodos}
+                            onAddSubTask={onAddSubTask}
+                            onUpdateDescription={onUpdateDescription}
+                            onUpdateText={onUpdateText}
+                            onUpdateLabel={onUpdateLabel}
+                            onActivate={onActivate}
+                            onSetDuration={onSetDuration}
+                            onBuyback={onBuyback}
+                            onBreakDown={onBreakDown}
+                            onToggleTimer={onToggleTimer}
+                            onOpen={onOpen}
+                            viewContext={viewContext}
+                            visibleIds={visibleIds}
+                            parentTier={effectiveTier}
+                            isDraggable={isDraggable}
+                            showNestZones={showNestZones}
+                            draggedTaskId={draggedTaskId}
+                        />
+                    ))}
+                </SortableContext>
 
                 {onAddSubTask && !isContextParent && (
                     <form onSubmit={handleSubTaskSubmit} className="flex items-center gap-2 group p-2">
@@ -1201,6 +1306,7 @@ const TodoItem: React.FC<TodoItemProps> = ({
                                 viewContext={viewContext}
                                 visibleIds={visibleIds}
                                 parentTier={effectiveTier}
+                                isDraggable={false}
                             />
                         ))}
                      </div>

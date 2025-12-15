@@ -42,6 +42,7 @@ export interface Todo {
   lastStartedAt?: number; // Timestamp when timer was last started
   routineId?: string; // Link to the routine generator
   multiplier?: number; // Orbital Velocity Multiplier (1.0 - 1.5x)
+  order?: number; // Position within the same parent level for drag and drop ordering
 }
 
 export interface Note {
