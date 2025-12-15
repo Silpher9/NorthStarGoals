@@ -11,12 +11,15 @@ import {
     DragStartEvent,
     DragOverEvent,
     closestCenter,
+    pointerWithin,
+    rectIntersection,
     PointerSensor,
     KeyboardSensor,
     TouchSensor,
     useSensor,
     useSensors,
     useDroppable,
+    CollisionDetection,
 } from '@dnd-kit/core';
 import {
     SortableContext,
@@ -499,6 +502,14 @@ const ProjectView: React.FC<ProjectViewProps> = ({
     const [activeId, setActiveId] = useState<string | null>(null);
     const [overId, setOverId] = useState<string | null>(null);
     const [isDragging, setIsDragging] = useState(false);
+
+    // dnd-kit IDs are "UniqueIdentifier" (string | number). Be defensive: bad/legacy data
+    // or custom droppables can still produce non-string values at runtime.
+    const toIdString = useCallback((id: unknown): string | null => {
+        if (typeof id === 'string') return id;
+        if (typeof id === 'number') return String(id);
+        return null;
+    }, []);
     
     // Determine style based on goal category or default to normal/purple
     const tier = (goal.goalCategory as GoalTier) || 'normal';
@@ -555,6 +566,54 @@ const ProjectView: React.FC<ProjectViewProps> = ({
         useSensor(KeyboardSensor)
     );
     
+    // Custom collision detection that prioritizes nest/unnest zones over sortable items
+    // and prefers more specific (nested) zones over parent zones
+    const customCollisionDetection: CollisionDetection = useCallback((args) => {
+        // First, check for nest/unnest zones using pointerWithin (most precise)
+        const pointerCollisions = pointerWithin(args);
+        
+        // Filter to only nest/unnest zones
+        const zoneCollisions = pointerCollisions.filter(collision => {
+            const id = String(collision.id);
+            return id.startsWith('nest-') || id.startsWith('unnest-');
+        });
+        
+        // If we have zone collisions, prefer them (they are explicit drop targets)
+        if (zoneCollisions.length > 0) {
+            // If multiple zones, prefer the one that's NOT a parent of others
+            // (i.e., prefer more deeply nested items)
+            if (zoneCollisions.length > 1) {
+                // Sort by how "deep" the zone is - zones for nested items should be preferred
+                const sortedZones = [...zoneCollisions].sort((a, b) => {
+                    const idA = String(a.id).replace(/^(nest|unnest)-/, '');
+                    const idB = String(b.id).replace(/^(nest|unnest)-/, '');
+                    const taskA = allTodos.find(t => t.id === idA);
+                    const taskB = allTodos.find(t => t.id === idB);
+                    
+                    // Count depth by walking up parentId chain
+                    const getDepth = (task: typeof taskA): number => {
+                        if (!task) return 0;
+                        let depth = 0;
+                        let current = task;
+                        while (current?.parentId) {
+                            depth++;
+                            current = allTodos.find(t => t.id === current?.parentId);
+                        }
+                        return depth;
+                    };
+                    
+                    // Higher depth (more nested) should come first
+                    return getDepth(taskB) - getDepth(taskA);
+                });
+                return [sortedZones[0]];
+            }
+            return zoneCollisions;
+        }
+        
+        // If no zone collisions, fall back to sortable items using closestCenter
+        return closestCenter(args);
+    }, [allTodos]);
+    
     // Check if a task is a descendant of another (to prevent circular nesting)
     const isDescendantOf = useCallback((childId: string, potentialParentId: string): boolean => {
         let currentId: string | undefined = childId;
@@ -567,12 +626,13 @@ const ProjectView: React.FC<ProjectViewProps> = ({
     }, [allTodos]);
     
     const handleDragStart = (event: DragStartEvent) => {
-        setActiveId(event.active.id as string);
+        const id = toIdString(event.active?.id);
+        setActiveId(id);
         setIsDragging(true);
     };
     
     const handleDragOver = (event: DragOverEvent) => {
-        setOverId(event.over?.id as string | null);
+        setOverId(toIdString(event.over?.id));
     };
     
     // Promotion Zone Component
@@ -609,124 +669,138 @@ const ProjectView: React.FC<ProjectViewProps> = ({
     };
     
     const handleDragEnd = (event: DragEndEvent) => {
-        const { active, over } = event;
-        setActiveId(null);
-        setOverId(null);
-        setIsDragging(false);
-        
-        if (!over || !onReorderTasks) return;
-        
-        const activeId = active.id as string;
-        const overId = over.id as string;
-        
-        if (activeId === overId) return;
-        
-        const activeTask = allTodos.find(t => t.id === activeId);
-        
-        if (!activeTask) return;
-        
-        // Handle nest zone: nest-{taskId}
-        if (overId.startsWith('nest-')) {
-            const targetTaskId = overId.replace('nest-', '');
-            const targetTask = allTodos.find(t => t.id === targetTaskId);
-            
-            if (!targetTask) return;
-            
-            // Prevent circular nesting
-            if (isDescendantOf(targetTaskId, activeId)) {
-                console.warn('Cannot nest a parent inside its own child');
+        try {
+            const { active, over } = event;
+            setActiveId(null);
+            setOverId(null);
+            setIsDragging(false);
+
+            if (!over || !onReorderTasks) return;
+
+            const activeIdStr = toIdString(active?.id);
+            const overIdStr = toIdString(over?.id);
+            if (!activeIdStr || !overIdStr) return;
+
+            if (activeIdStr === overIdStr) return;
+
+            const activeTask = allTodos.find(t => t.id === activeIdStr);
+            if (!activeTask) return;
+
+            // Handle nest zone: nest-{taskId}
+            if (overIdStr.startsWith('nest-')) {
+                const targetTaskId = overIdStr.replace('nest-', '');
+                const targetTask = allTodos.find(t => t.id === targetTaskId);
+                if (!targetTask) return;
+
+                // Prevent circular nesting
+                if (isDescendantOf(targetTaskId, activeIdStr)) {
+                    console.warn('Cannot nest a parent inside its own child');
+                    return;
+                }
+
+                // NEST: Make dragged task a child of target
+                const siblings = allTodos.filter(t => t.parentId === targetTaskId && t.id !== activeIdStr);
+                const newOrder = siblings.length > 0
+                    ? Math.max(...siblings.map(t => t.order ?? 0)) + 1
+                    : 0;
+
+                onReorderTasks([{
+                    id: activeIdStr,
+                    parentId: targetTaskId,
+                    order: newOrder
+                }]);
                 return;
             }
-            
-            // NEST: Make dragged task a child of target
-            const siblings = allTodos.filter(t => t.parentId === targetTaskId && t.id !== activeId);
-            const newOrder = siblings.length > 0 
-                ? Math.max(...siblings.map(t => t.order ?? 0)) + 1 
-                : 0;
-            
-            onReorderTasks([{
-                id: activeId,
-                parentId: targetTaskId,
-                order: newOrder
-            }]);
-            return;
-        }
-        
-        // Handle unnest zone: unnest-{taskId}
-        if (overId.startsWith('unnest-')) {
-            const taskId = overId.replace('unnest-', '');
-            if (taskId !== activeId) return;
-            
-            // UNNEST: Move task to parent level (same level as current parent)
-            const parent = allTodos.find(t => t.id === activeTask.parentId);
-            if (!parent) return; // Already at root level
-            
-            const newParentId = parent.parentId || goal.id;
-            const siblings = allTodos.filter(t => t.parentId === newParentId && t.id !== activeId);
-            
-            // Find parent's position and place promoted task right after it
-            const parentIndex = siblings.findIndex(t => t.id === parent.id);
-            const newOrder = parentIndex !== -1 
-                ? (siblings[parentIndex]?.order ?? 0) + 0.5 
-                : (siblings.length > 0 ? Math.max(...siblings.map(t => t.order ?? 0)) + 1 : 0);
-            
-            onReorderTasks([{
-                id: activeId,
-                parentId: newParentId === goal.id ? goal.id : newParentId,
-                order: newOrder
-            }]);
-            return;
-        }
-        
-        // Special handling for promotion zone
-        if (overId === 'promotion-zone') {
-            // PROMOTE: Move task to parent level (same level as current parent)
-            const parent = allTodos.find(t => t.id === activeTask.parentId);
-            if (!parent) return; // Already at root level
-            
-            const newParentId = parent.parentId || goal.id;
-            const siblings = allTodos.filter(t => t.parentId === newParentId && t.id !== activeId);
-            
-            // Find parent's position and place promoted task right after it
-            const parentIndex = siblings.findIndex(t => t.id === parent.id);
-            const newOrder = parentIndex !== -1 
-                ? (siblings[parentIndex]?.order ?? 0) + 0.5 
-                : (siblings.length > 0 ? Math.max(...siblings.map(t => t.order ?? 0)) + 1 : 0);
-            
-            onReorderTasks([{
-                id: activeId,
-                parentId: newParentId === goal.id ? goal.id : newParentId,
-                order: newOrder
-            }]);
-            return;
-        }
-        
-        const overTask = allTodos.find(t => t.id === overId);
-        if (!overTask) return;
-        
-        // Check if we're at the same parent level
-        const sameParent = activeTask.parentId === overTask.parentId;
-        
-        if (sameParent) {
+
+            // Handle unnest zone: unnest-{parentId}
+            // The unnest zone appears on the PARENT task, so the ID contains the parent's ID
+            if (overIdStr.startsWith('unnest-')) {
+                const droppedOnParentId = overIdStr.replace('unnest-', '');
+                
+                // Verify the dragged task is indeed a child of this parent
+                if (activeTask.parentId !== droppedOnParentId) return;
+
+                // UNNEST: Move task to parent level (same level as current parent)
+                const parent = allTodos.find(t => t.id === droppedOnParentId);
+                if (!parent) return; // Already at root level
+
+                const newParentId = parent.parentId || goal.id;
+                const siblings = allTodos.filter(t => t.parentId === newParentId && t.id !== activeIdStr);
+
+                // Find parent's position and place promoted task right after it
+                const parentIndex = siblings.findIndex(t => t.id === parent.id);
+                const newOrder = parentIndex !== -1
+                    ? (siblings[parentIndex]?.order ?? 0) + 0.5
+                    : (siblings.length > 0 ? Math.max(...siblings.map(t => t.order ?? 0)) + 1 : 0);
+
+                onReorderTasks([{
+                    id: activeIdStr,
+                    parentId: newParentId === goal.id ? goal.id : newParentId,
+                    order: newOrder
+                }]);
+                return;
+            }
+
+            // Special handling for promotion zone
+            if (overIdStr === 'promotion-zone') {
+                // PROMOTE: Move task to parent level (same level as current parent)
+                const parent = allTodos.find(t => t.id === activeTask.parentId);
+                if (!parent) return; // Already at root level
+
+                const newParentId = parent.parentId || goal.id;
+                const siblings = allTodos.filter(t => t.parentId === newParentId && t.id !== activeIdStr);
+
+                // Find parent's position and place promoted task right after it
+                const parentIndex = siblings.findIndex(t => t.id === parent.id);
+                const newOrder = parentIndex !== -1
+                    ? (siblings[parentIndex]?.order ?? 0) + 0.5
+                    : (siblings.length > 0 ? Math.max(...siblings.map(t => t.order ?? 0)) + 1 : 0);
+
+                onReorderTasks([{
+                    id: activeIdStr,
+                    parentId: newParentId === goal.id ? goal.id : newParentId,
+                    order: newOrder
+                }]);
+                return;
+            }
+
+            const overTask = allTodos.find(t => t.id === overIdStr);
+            if (!overTask) return;
+
+            // Check if we're at the same parent level
+            const sameParent = activeTask.parentId === overTask.parentId;
+            if (!sameParent) return;
+
             // REORDER: Same level reordering
-            const oldIndex = activeTasks.findIndex(t => t.id === activeId);
-            const newIndex = activeTasks.findIndex(t => t.id === overId);
+            // Get siblings at the same level (could be top-level or nested)
+            const siblings = allTodos
+                .filter(t => t.parentId === activeTask.parentId && !t.completed && t.status !== 'graveyard')
+                .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
             
+            const oldIndex = siblings.findIndex(t => t.id === activeIdStr);
+            const newIndex = siblings.findIndex(t => t.id === overIdStr);
+
             if (oldIndex !== -1 && newIndex !== -1) {
-                const reorderedTasks = arrayMove(activeTasks, oldIndex, newIndex);
+                const reorderedTasks = arrayMove(siblings, oldIndex, newIndex);
                 const updates = reorderedTasks.map((task, index) => ({
                     id: task.id,
                     order: index
                 }));
                 onReorderTasks(updates);
             }
+        } catch (err) {
+            // Never let drag interactions blank the whole app.
+            console.error('Drag end failed:', err);
+            setActiveId(null);
+            setOverId(null);
+            setIsDragging(false);
         }
     };
 
     return (
         <DndContext
             sensors={sensors}
-            collisionDetection={closestCenter}
+            collisionDetection={customCollisionDetection}
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}

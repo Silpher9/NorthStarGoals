@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { Todo } from '../types';
-import { Trash2, Check, Clock, Trophy, FolderOpen, ChevronRight, ChevronDown, Plus, CornerDownRight, AlignLeft, Layers, Zap, Tag, Lock, Timer, RefreshCcw, Play, Pause, Archive, RotateCcw, X as XIcon, Edit3, Rocket, Eye, EyeOff, Flame, GripVertical } from 'lucide-react';
+import { Trash2, Check, Clock, Trophy, FolderOpen, ChevronLeft, ChevronRight, ChevronDown, Plus, CornerDownRight, AlignLeft, Layers, Zap, Tag, Lock, Timer, RefreshCcw, Play, Pause, Archive, RotateCcw, X as XIcon, Edit3, Rocket, Eye, EyeOff, Flame, GripVertical } from 'lucide-react';
 import RichTextEditor from './RichTextEditor';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -94,11 +94,13 @@ const TodoItem: React.FC<TodoItemProps> = ({
     disabled: !showNestZones || draggedTaskId === todo.id || todo.completed || todo.status === 'graveyard' || todo.status === 'archive',
   });
   
-  // Unnest zone droppable (only for nested tasks)
-  const hasParent = todo.parentId !== undefined && todo.parentId !== null;
+  // Unnest zone droppable - show on PARENT of dragged task
+  // Find if this todo is the parent of the currently dragged task
+  const draggedTask = draggedTaskId && allTodos ? allTodos.find(t => t.id === draggedTaskId) : null;
+  const isDraggedTaskParent = draggedTask?.parentId === todo.id;
   const { setNodeRef: setUnnestRef, isOver: isUnnestOver } = useDroppable({
-    id: `unnest-${todo.id}`,
-    disabled: !showNestZones || !hasParent || draggedTaskId !== todo.id,
+    id: `unnest-${todo.id}`, // Use this todo's ID (the parent) - handler will find the dragged task
+    disabled: !showNestZones || !isDraggedTaskParent,
   });
   
   // Activation / Duration Input State
@@ -920,7 +922,7 @@ const TodoItem: React.FC<TodoItemProps> = ({
             </div>
         )}
         
-        {showNestZones && draggedTaskId === todo.id && hasParent && (
+        {showNestZones && isDraggedTaskParent && (
             <div
                 ref={setUnnestRef}
                 className={`
