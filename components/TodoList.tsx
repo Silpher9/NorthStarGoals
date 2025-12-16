@@ -127,8 +127,9 @@ interface ProjectTaskFormProps {
     goalText: string;
     style: { border: string; bg: string };
     labelOptions?: string[];
+    tier?: 'gold' | 'silver' | 'bronze' | 'normal';
 }
-const ProjectTaskForm: React.FC<ProjectTaskFormProps> = ({ onAdd, goalText, style, labelOptions = [] }) => {
+const ProjectTaskForm: React.FC<ProjectTaskFormProps> = ({ onAdd, goalText, style, labelOptions = [], tier = 'normal' }) => {
     const [input, setInput] = useState('');
     const [label, setLabel] = useState('');
     const [isLabelMenuOpen, setIsLabelMenuOpen] = useState(false);
@@ -206,22 +207,38 @@ const ProjectTaskForm: React.FC<ProjectTaskFormProps> = ({ onAdd, goalText, styl
                             className="absolute left-0 top-full mt-2 w-full max-h-44 overflow-auto rounded-xl border border-slate-700/70 bg-slate-950/95 backdrop-blur shadow-2xl z-50"
                             onMouseDown={(e) => e.preventDefault()}
                         >
-                            {filteredLabelOptions.slice(0, 20).map((opt, idx) => (
-                                <button
-                                    key={opt}
-                                    type="button"
-                                    onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        setLabel(opt);
-                                        setIsLabelMenuOpen(false);
-                                    }}
-                                    className={`w-full text-left px-3 py-2 text-[10px] uppercase font-bold tracking-wider transition-colors ${
-                                        idx === labelMenuIndex ? 'bg-indigo-600/30 text-indigo-200' : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
-                                    }`}
-                                >
-                                    {opt}
-                                </button>
-                            ))}
+                            {filteredLabelOptions.slice(0, 20).map((opt, idx) => {
+                                const tierColors = tier === 'gold' 
+                                    ? 'text-yellow-500 hover:bg-yellow-900/30' 
+                                    : tier === 'silver' 
+                                    ? 'text-slate-300 hover:bg-slate-700/30' 
+                                    : tier === 'bronze' 
+                                    ? 'text-orange-500 hover:bg-orange-900/30' 
+                                    : 'text-purple-400 hover:bg-purple-900/30';
+                                const activeColors = tier === 'gold'
+                                    ? 'bg-yellow-900/40 text-yellow-400'
+                                    : tier === 'silver'
+                                    ? 'bg-slate-700/40 text-slate-200'
+                                    : tier === 'bronze'
+                                    ? 'bg-orange-900/40 text-orange-400'
+                                    : 'bg-indigo-600/30 text-indigo-200';
+                                return (
+                                    <button
+                                        key={opt}
+                                        type="button"
+                                        onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            setLabel(opt);
+                                            setIsLabelMenuOpen(false);
+                                        }}
+                                        className={`w-full text-left px-3 py-2 text-[10px] uppercase font-bold tracking-wider transition-colors ${
+                                            idx === labelMenuIndex ? activeColors : tierColors
+                                        }`}
+                                    >
+                                        {opt}
+                                    </button>
+                                );
+                            })}
                         </div>
                     )}
                 </div>
@@ -524,6 +541,35 @@ const ProjectView: React.FC<ProjectViewProps> = ({
         normal: { text: 'text-purple-400', border: 'border-purple-500/50', bg: 'bg-purple-500' }
     };
     const s = styles[tier] || styles.normal;
+
+    // Compute goal-specific label options (only labels from tasks under this goal)
+    const goalLabelOptions = useMemo(() => {
+        // Helper to get all descendant IDs of this goal
+        const getDescendantIds = (rootId: string): Set<string> => {
+            const ids = new Set<string>([rootId]);
+            const addChildren = (parentId: string) => {
+                allTodos.filter(t => t.parentId === parentId).forEach(child => {
+                    ids.add(child.id);
+                    addChildren(child.id);
+                });
+            };
+            addChildren(rootId);
+            return ids;
+        };
+        
+        const descendantIds = getDescendantIds(goal.id);
+        
+        // Deduplicate case-insensitively but keep first-seen casing
+        const map = new Map<string, string>();
+        for (const t of allTodos) {
+            if (!descendantIds.has(t.id)) continue;
+            const raw = (t.customLabel || '').trim();
+            if (!raw) continue;
+            const key = raw.toLowerCase();
+            if (!map.has(key)) map.set(key, raw);
+        }
+        return Array.from(map.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    }, [allTodos, goal.id]);
 
     const handleDeleteProject = () => {
         if (window.confirm("Are you sure you want to delete this task and all its subtasks?")) {
@@ -847,10 +893,10 @@ const ProjectView: React.FC<ProjectViewProps> = ({
                             <TodoItem 
                                 key={todo.id} 
                                 todo={todo} 
-                                onToggle={onToggle} 
+                                onToggle={onToggle}
                                 onDelete={onDelete}
                                 allTodos={allTodos}
-                                labelOptions={labelOptions}
+                                labelOptions={goalLabelOptions}
                                 onAddSubTask={onAddSubTask}
                                 onUpdateDescription={onUpdateDescription}
                                 onUpdateText={onUpdateText}
@@ -876,10 +922,10 @@ const ProjectView: React.FC<ProjectViewProps> = ({
                                 <TodoItem 
                                     key={todo.id} 
                                     todo={todo} 
-                                    onToggle={onToggle} 
+                                    onToggle={onToggle}
                                     onDelete={onDelete}
                                     allTodos={allTodos}
-                                    labelOptions={labelOptions}
+                                    labelOptions={goalLabelOptions}
                                     onAddSubTask={onAddSubTask}
                                     onUpdateDescription={onUpdateDescription}
                                     onUpdateText={onUpdateText}
@@ -900,7 +946,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({
 
                 {/* Input Area */}
                 <div className="absolute bottom-0 left-0 w-full p-4 bg-gradient-to-t from-[#0f172a] via-[#0f172a] to-transparent z-20">
-                    <ProjectTaskForm onAdd={onAddTask} goalText={goal.text} style={s} labelOptions={labelOptions} />
+                    <ProjectTaskForm onAdd={onAddTask} goalText={goal.text} style={s} labelOptions={goalLabelOptions} tier={tier} />
                 </div>
             </div>
         </DndContext>

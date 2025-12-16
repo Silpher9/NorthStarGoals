@@ -707,23 +707,39 @@ const TodoItem: React.FC<TodoItemProps> = ({
                                         className="absolute left-0 top-full mt-1 w-44 max-h-40 overflow-auto rounded-lg border border-slate-700/70 bg-slate-950/95 backdrop-blur shadow-2xl z-50"
                                         onMouseDown={(e) => e.preventDefault()}
                                       >
-                                        {filteredLabelOptions.slice(0, 20).map((opt, idx) => (
-                                          <button
-                                            key={opt}
-                                            type="button"
-                                            onMouseDown={(e) => {
-                                              e.preventDefault();
-                                              commitLabelOption(opt);
-                                            }}
-                                            className={`w-full text-left px-3 py-2 text-[10px] uppercase font-bold tracking-wider transition-colors ${
-                                              idx === labelMenuIndex
-                                                ? 'bg-indigo-600/30 text-indigo-200'
-                                                : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
-                                            }`}
-                                          >
-                                            {opt}
-                                          </button>
-                                        ))}
+                                        {filteredLabelOptions.slice(0, 20).map((opt, idx) => {
+                                          const tierColors = effectiveTier === 'gold' 
+                                            ? 'text-yellow-500 hover:bg-yellow-900/30' 
+                                            : effectiveTier === 'silver' 
+                                            ? 'text-slate-300 hover:bg-slate-700/30' 
+                                            : effectiveTier === 'bronze' 
+                                            ? 'text-orange-500 hover:bg-orange-900/30' 
+                                            : 'text-purple-400 hover:bg-purple-900/30';
+                                          const activeColors = effectiveTier === 'gold'
+                                            ? 'bg-yellow-900/40 text-yellow-400'
+                                            : effectiveTier === 'silver'
+                                            ? 'bg-slate-700/40 text-slate-200'
+                                            : effectiveTier === 'bronze'
+                                            ? 'bg-orange-900/40 text-orange-400'
+                                            : 'bg-indigo-600/30 text-indigo-200';
+                                          return (
+                                            <button
+                                              key={opt}
+                                              type="button"
+                                              onMouseDown={(e) => {
+                                                e.preventDefault();
+                                                commitLabelOption(opt);
+                                              }}
+                                              className={`w-full text-left px-3 py-2 text-[10px] uppercase font-bold tracking-wider transition-colors ${
+                                                idx === labelMenuIndex
+                                                  ? activeColors
+                                                  : tierColors
+                                              }`}
+                                            >
+                                              {opt}
+                                            </button>
+                                          );
+                                        })}
                                       </div>
                                     )}
                                 </div>
