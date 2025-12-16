@@ -474,6 +474,7 @@ interface ProjectViewProps {
     onSetDuration: (id: string, durationMinutes: number) => void;
     onBuyback: (id: string, cost: number) => void;
     onBreakDown: (id: string) => Promise<void>;
+    onDuplicate: (id: string) => void;
     onReorderTasks?: (updates: Array<{ id: string; order?: number; parentId?: string }>) => void;
     totalPlannedTime: number;
 }
@@ -495,6 +496,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({
     onSetDuration,
     onBuyback,
     onBreakDown,
+    onDuplicate,
     onReorderTasks,
     totalPlannedTime
 }) => {
@@ -857,6 +859,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({
                                 onSetDuration={onSetDuration}
                                 onBuyback={onBuyback}
                                 onBreakDown={onBreakDown}
+                                onDuplicate={onDuplicate}
                                 parentTier={goal.goalCategory} // Pass project tier down for multipliers
                                 viewContext="orbit"
                                 isDraggable={true}
@@ -885,6 +888,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({
                                     onSetDuration={onSetDuration}
                                     onBuyback={onBuyback}
                                     onBreakDown={onBreakDown}
+                                    onDuplicate={onDuplicate}
                                     parentTier={goal.goalCategory}
                                     viewContext="orbit"
                                     isDraggable={false}
@@ -921,6 +925,7 @@ interface GoalManagementViewProps {
     onBuyback: (id: string, cost: number) => void;
     onBreakDown: (id: string) => Promise<void>;
     onAddSubTask: (parentId: string, text: string) => void;
+    onDuplicate: (id: string) => void;
     // Routine Props
     onAddRoutine: (routine: Omit<Routine, 'id' | 'createdAt' | 'lastGeneratedDate' | 'completedCycles' | 'streak'>) => void;
     onDeleteRoutine: (id: string) => void;
@@ -944,6 +949,7 @@ const GoalManagementView: React.FC<GoalManagementViewProps> = ({
     onBuyback,
     onBreakDown,
     onAddSubTask,
+    onDuplicate,
     onAddRoutine,
     onDeleteRoutine,
     totalPlannedTime
@@ -1102,6 +1108,7 @@ const GoalManagementView: React.FC<GoalManagementViewProps> = ({
                                 onSetDuration={onSetDuration}
                                 onBuyback={onBuyback}
                                 onBreakDown={onBreakDown}
+                                onDuplicate={onDuplicate}
                                 onOpen={onOpenProject} // Pass onOpen to show folder button
                                 viewContext="orbit" // Allow full controls
                             />
@@ -1752,6 +1759,36 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
   const handleAddSubTask = useCallback((parentId: string, text: string) => {
       addTodo(text, 'normal', parentId);
   }, [addTodo]);
+
+  // Duplicate task at the same nested level
+  const handleDuplicateTask = useCallback((id: string) => {
+      setTodos(prev => {
+          const original = prev.find(t => t.id === id);
+          if (!original) return prev;
+
+          // Calculate order: place duplicate right after the original
+          const siblings = prev.filter(t => t.parentId === original.parentId && t.status !== 'graveyard');
+          const originalOrder = original.order ?? 0;
+          const newOrder = originalOrder + 0.5; // Position between original and next sibling
+
+          const duplicatedTask: Todo = {
+              id: generateId(),
+              text: original.text,
+              completed: false,
+              createdAt: Date.now(),
+              status: 'active',
+              label: original.label,
+              parentId: original.parentId,
+              goalCategory: original.goalCategory,
+              customLabel: original.customLabel,
+              description: original.description,
+              durationMinutes: original.durationMinutes,
+              order: newOrder
+          };
+
+          return [duplicatedTask, ...prev];
+      });
+  }, []);
   
   // Optimized delete
   const deleteTodo = useCallback((id: string) => {
@@ -2158,6 +2195,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
                 onSetDuration={setTaskDuration}
                 onBuyback={buybackTask}
                 onBreakDown={handleBreakDown}
+                onDuplicate={handleDuplicateTask}
                 onReorderTasks={handleReorderTasks}
                 totalPlannedTime={totalPlannedMinutes}
             />
@@ -2222,6 +2260,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
                 onBuyback={buybackTask}
                 onBreakDown={handleBreakDown}
                 onAddSubTask={handleAddSubTask}
+                onDuplicate={handleDuplicateTask}
                 onAddRoutine={handleAddRoutine}
                 onDeleteRoutine={handleDeleteRoutine}
                 totalPlannedTime={totalPlannedMinutes}
@@ -2287,6 +2326,7 @@ const TodoList: React.FC<TodoListProps> = ({ onGoalsChange, onSyncStateChange, o
                             onSetDuration={setTaskDuration}
                             onBuyback={buybackTask}
                             onBreakDown={handleBreakDown}
+                            onDuplicate={handleDuplicateTask}
                             onToggleTimer={toggleTimer}
                             viewContext="today"
                         />

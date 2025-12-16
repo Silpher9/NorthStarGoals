@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { Todo } from '../types';
-import { Trash2, Check, Clock, Trophy, FolderOpen, ChevronLeft, ChevronRight, ChevronDown, Plus, CornerDownRight, AlignLeft, Layers, Zap, Tag, Lock, Timer, RefreshCcw, Play, Pause, Archive, RotateCcw, X as XIcon, Edit3, Rocket, Eye, EyeOff, Flame, GripVertical } from 'lucide-react';
+import { Trash2, Check, Clock, Trophy, FolderOpen, ChevronLeft, ChevronRight, ChevronDown, Plus, CornerDownRight, AlignLeft, Layers, Zap, Tag, Lock, Timer, RefreshCcw, Play, Pause, Archive, RotateCcw, X as XIcon, Edit3, Rocket, Eye, EyeOff, Flame, GripVertical, Copy } from 'lucide-react';
 import RichTextEditor from './RichTextEditor';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -31,6 +31,7 @@ interface TodoItemProps {
   onBreakDown?: (id: string) => Promise<void>;
   onToggleTimer?: (id: string) => void;
   onOpen?: (id: string) => void;
+  onDuplicate?: (id: string) => void;
   viewContext?: 'orbit' | 'today' | 'list';
   visibleIds?: Set<string>;
   isDraggable?: boolean;
@@ -55,6 +56,7 @@ const TodoItem: React.FC<TodoItemProps> = ({
   onBreakDown,
   onToggleTimer,
   onOpen,
+  onDuplicate,
   viewContext = 'list',
   visibleIds,
   isDraggable = false,
@@ -1051,6 +1053,20 @@ const TodoItem: React.FC<TodoItemProps> = ({
                                     <Edit3 size={14} />
                                 </button>
 
+                                {/* Duplicate Task Button */}
+                                {onDuplicate && (
+                                    <button 
+                                        onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            onDuplicate(todo.id);
+                                        }}
+                                        className="p-3 rounded-lg text-slate-500 hover:text-cyan-400 hover:bg-cyan-900/30 transition-colors"
+                                        title="Duplicate Task"
+                                    >
+                                        <Copy size={14} />
+                                    </button>
+                                )}
+
                                 {/* Delete Task Button */}
                                 <button 
                                     onClick={(e) => { 
@@ -1082,6 +1098,20 @@ const TodoItem: React.FC<TodoItemProps> = ({
                                     {canActivate ? <Zap size={16} className="fill-current" /> : <Lock size={14} />}
                                 </button>
 
+                                {/* Duplicate Task Button */}
+                                {onDuplicate && (
+                                    <button 
+                                        onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            onDuplicate(todo.id);
+                                        }}
+                                        className="p-3 rounded-lg text-slate-500 hover:text-cyan-400 hover:bg-cyan-900/30 transition-colors"
+                                        title="Duplicate Task"
+                                    >
+                                        <Copy size={14} />
+                                    </button>
+                                )}
+
                                 {/* Delete Task Button */}
                                 <button 
                                     onClick={(e) => { 
@@ -1099,18 +1129,32 @@ const TodoItem: React.FC<TodoItemProps> = ({
                 )
             )}
 
-            {/* Delete button for parent tasks (with subtasks) in Orbit view */}
+            {/* Duplicate and Delete buttons for parent tasks (with subtasks) in Orbit view */}
             {!isActivated && viewContext === 'orbit' && hasSubTasks && !isGraveyard && !isArchived && !todo.completed && (
-                <button 
-                    onClick={(e) => { 
-                        e.stopPropagation(); 
-                        setShowDeleteConfirmation(true);
-                    }}
-                    className="p-3 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/30 transition-colors"
-                    title="Delete Task"
-                >
-                    <Trash2 size={14} />
-                </button>
+                <>
+                    {onDuplicate && (
+                        <button 
+                            onClick={(e) => { 
+                                e.stopPropagation(); 
+                                onDuplicate(todo.id);
+                            }}
+                            className="p-3 rounded-lg text-slate-500 hover:text-cyan-400 hover:bg-cyan-900/30 transition-colors"
+                            title="Duplicate Task"
+                        >
+                            <Copy size={14} />
+                        </button>
+                    )}
+                    <button 
+                        onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setShowDeleteConfirmation(true);
+                        }}
+                        className="p-3 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/30 transition-colors"
+                        title="Delete Task"
+                    >
+                        <Trash2 size={14} />
+                    </button>
+                </>
             )}
             
             {showBuybackButton && showDetails && (
