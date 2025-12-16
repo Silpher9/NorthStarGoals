@@ -1023,8 +1023,8 @@ const TodoItem: React.FC<TodoItemProps> = ({
                         </div>
                     </form>
                 ) : (
-                    // ORBIT VIEW CONTROLS
-                    !isActivated && viewContext === 'orbit' && (
+                    // ORBIT VIEW CONTROLS (for tasks WITHOUT subtasks - parent tasks with subtasks have their own controls below)
+                    !isActivated && viewContext === 'orbit' && !hasSubTasks && (
                         hasDuration ? (
                             // DURATION IS SET -> SHOW ACTIVATE BUTTON
                             <div className="flex items-center gap-2">
